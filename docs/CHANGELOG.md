@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Radicale Desktop Calendar are documented here.
+All notable changes to CalDAV Desktop are documented here.
 
 ## [0.1.0] - 2026-06-22
 
@@ -176,4 +176,4 @@ cd apps/renderer && pnpm dev    # Terminal 2
 ---
 
 **Generated**: 2026-06-22
-**Maintained by**: Radicale Desktop Team
+**Maintained by**: CalDAV Desktop Team

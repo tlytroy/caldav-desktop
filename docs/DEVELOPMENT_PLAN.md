@@ -1,8 +1,8 @@
-# Radicale Desktop Calendar 开发计划
+# Calendex 开发计划
 
 ## 📋 项目概述
 
-Radicale Desktop Calendar 是一个跨平台的桌面日历应用程序，支持与 Radicale 服务器完全同步，具有现代化的用户界面设计和完整的 CalDAV 支持。
+Calendex 是一个跨平台的桌面日历应用程序，支持与 Radicale 服务器完全同步，具有现代化的用户界面设计和完整的 CalDAV 支持。
 
 ## ✅ 当前状态 (v0.1.0)
 

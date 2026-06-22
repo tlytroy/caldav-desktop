@@ -1,6 +1,6 @@
 {
-  "productName": "Radicale Desktop Calendar",
-  "appId": "com.radicale.desktop.calendar",
+  "productName": "CalDAV Desktop",
+  "appId": "com.caldav.desktop.calendar",
   "directories": {
     "output": "dist-electron"
   },

@@ -1,4 +1,4 @@
-# Radicale Desktop Calendar 开发日志
+# Calendex 开发日志
 
 ## 📅 2026-06-22
 
