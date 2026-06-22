@@ -10,3 +10,15 @@ build/
 *.swp
 *.swo
 pnpm-lock.yaml
+# Build directories
+apps/desktop/dist-electron/
+apps/*/dist/
+apps/*/build/
+# Package files
+*.AppImage
+*.tar.gz
+*.exe
+*.dmg
+*.zip
+# Unpacked directories
+*-unpacked/
