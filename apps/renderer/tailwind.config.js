@@ -155,6 +155,13 @@ export default {
         '2xl': '1rem',
         '3xl': '1.5rem',
         'full': '9999px',
+      },
+      // 添加最小触摸目标大小
+      minHeight: {
+        'touch': '44px',
+      },
+      minWidth: {
+        'touch': '44px',
       }
     },
   },

@@ -67,16 +67,17 @@ export default function App() {
 
   return (
     <GlobalErrorBoundary>
-      <div className="min-h-screen bg-gray-50 dark:bg-neutral-800 p-8">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 dark:text-white">
+      <div className="min-h-screen bg-gray-50 dark:bg-neutral-800 p-4 sm:p-8">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 sm:mb-8 gap-4">
+          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">
             CalDAV Desktop
           </h1>
           <div className="flex items-center space-x-2">
             <ThemeToggle />
             <button
               onClick={() => setIsSettingsModalOpen(true)}
-              className="px-4 py-2 text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors flex items-center space-x-2"
+              className="px-4 py-2 text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors flex items-center space-x-2"
+              aria-label="打开设置"
             >
               <Settings className="w-5 h-5" />
               <span>设置</span>

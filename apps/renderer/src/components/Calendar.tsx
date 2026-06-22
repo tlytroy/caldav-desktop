@@ -178,8 +178,11 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
         select={handleSelect}
         eventClick={handleEventClick}
         eventContent={(arg) => {
-          return <div>{arg.event.title}</div>;
+          return <div className="touch-pan-x touch-pan-y">{arg.event.title}</div>;
         }}
+        height="auto"
+        contentHeight="auto"
+        expandRows={true}
       />
 
       {/* 事件编辑模态框 */}
@@ -198,24 +201,25 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
+              className={`w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
               placeholder="输入事件标题"
+              autoFocus
             />
           </div>
 
-          <div>
-            <label className="flex items-center space-x-2">
+          <div className="flex items-center">
+            <label className="flex items-center space-x-3">
               <input
                 type="checkbox"
                 checked={formData.allDay}
                 onChange={(e) => setFormData({ ...formData, allDay: e.target.checked })}
-                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                className="h-5 w-5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
               />
-              <span className="text-sm font-medium text-gray-700">全天事件</span>
+              <span className="text-base font-medium text-gray-700 dark:text-gray-300">全天事件</span>
             </label>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 开始日期 *
@@ -228,7 +232,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
                   newStart.setHours(formData.start.getHours(), formData.start.getMinutes());
                   setFormData({ ...formData, start: newStart });
                 }}
-                className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
+                className={`w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
               />
             </div>
             <div>
@@ -243,13 +247,13 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
                   newEnd.setHours(formData.end.getHours(), formData.end.getMinutes());
                   setFormData({ ...formData, end: newEnd });
                 }}
-                className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
+                className={`w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
               />
             </div>
           </div>
 
           {!formData.allDay && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   开始时间
@@ -263,7 +267,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
                     newStart.setHours(hours, minutes);
                     setFormData({ ...formData, start: newStart });
                   }}
-                  className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
+                  className={`w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
                 />
               </div>
               <div>
@@ -279,7 +283,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
                     newEnd.setHours(hours, minutes);
                     setFormData({ ...formData, end: newEnd });
                   }}
-                  className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
+                  className={`w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
                 />
               </div>
             </div>
@@ -292,8 +296,8 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className={`w-full px-3 py-2 border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
-              rows={3}
+              className={`w-full px-4 py-3 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-600 dark:text-white`}
+              rows={4}
               placeholder="输入事件描述（可选）"
             />
           </div>
@@ -322,17 +326,17 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
           />
         </div>
 
-        <div className="flex justify-end space-x-3 mt-6">
+        <div className="flex flex-wrap justify-end gap-3 mt-6">
           <button
             onClick={() => setShowModal(false)}
-            className={`px-4 py-2 text-gray-700 bg-gray-100 ${borderRadius} hover:bg-gray-200 transition-colors`}
+            className={`px-6 py-3 text-base text-gray-700 bg-gray-100 ${borderRadius} hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors min-w-[100px]`}
           >
             取消
           </button>
           {formData.id && (
             <button
               onClick={handleDeleteClick}
-              className={`px-4 py-2 text-red-600 bg-red-50 ${borderRadius} hover:bg-red-100 transition-colors`}
+              className={`px-6 py-3 text-base text-red-600 bg-red-50 ${borderRadius} hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors min-w-[100px]`}
             >
               删除
             </button>
@@ -340,7 +344,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
           <button
             onClick={handleSubmit}
             disabled={!formData.title.trim()}
-            className={`px-4 py-2 text-white bg-indigo-600 ${borderRadius} hover:bg-indigo-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed`}
+            className={`px-6 py-3 text-base text-white bg-indigo-600 ${borderRadius} hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed min-w-[100px]`}
           >
             {formData.id ? '保存更改' : '创建事件'}
           </button>
@@ -354,19 +358,19 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
         title="确认删除"
         size="sm"
       >
-        <p className="text-gray-600 mb-4">
+        <p className="text-gray-600 dark:text-gray-300 mb-6 text-base">
           确定要删除事件 "{eventToDelete?.title}" 吗？此操作无法撤销。
         </p>
-        <div className="flex justify-end space-x-3">
+        <div className="flex flex-wrap justify-end gap-3">
           <button
             onClick={() => setShowDeleteConfirm(false)}
-            className={`px-4 py-2 text-gray-700 bg-gray-100 ${borderRadius} hover:bg-gray-200 transition-colors`}
+            className={`px-6 py-3 text-base text-gray-700 bg-gray-100 ${borderRadius} hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors min-w-[100px]`}
           >
             取消
           </button>
           <button
             onClick={confirmDelete}
-            className={`px-4 py-2 text-white bg-red-600 ${borderRadius} hover:bg-red-700 transition-colors`}
+            className={`px-6 py-3 text-base text-white bg-red-600 ${borderRadius} hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors min-w-[100px]`}
           >
             删除
           </button>

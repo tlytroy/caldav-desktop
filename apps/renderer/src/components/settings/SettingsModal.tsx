@@ -97,19 +97,20 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <span className="text-gray-700 dark:text-gray-200">暗色模式</span>
             <button
               onClick={toggleTheme}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+              className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${
                 isDarkMode ? 'bg-indigo-600' : 'bg-gray-300'
               }`}
+              aria-label={isDarkMode ? '切换到浅色模式' : '切换到深色模式'}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  isDarkMode ? 'translate-x-6' : 'translate-x-1'
+                className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform shadow-md ${
+                  isDarkMode ? 'translate-x-7' : 'translate-x-1'
                 }`}
               />
               {isDarkMode ? (
-                <Moon className="absolute left-1 w-3 h-3 text-gray-400" />
+                <Moon className="absolute left-2 w-4 h-4 text-gray-400" />
               ) : (
-                <Sun className="absolute right-1 w-3 h-3 text-yellow-500" />
+                <Sun className="absolute right-2 w-4 h-4 text-yellow-500" />
               )}
             </button>
           </div>
@@ -122,20 +123,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             配色方案
           </h3>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {Object.entries(morandiSchemes).map(([key, scheme]) => (
               <button
                 key={key}
                 onClick={() => handleColorSchemeChange(key)}
-                className={`p-4 rounded-lg border-2 transition-all ${
+                className={`p-4 rounded-lg border-2 transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
                   colorScheme === key && !customColors
                     ? 'border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900'
                     : 'border-gray-200 dark:border-gray-600 hover:border-indigo-300 dark:hover:border-indigo-700'
                 }`}
+                aria-label={`选择${scheme.name}配色方案`}
               >
                 <div className="flex items-center mb-2">
                   <div
-                    className="w-4 h-4 rounded-full mr-2"
+                    className="w-5 h-5 rounded-full mr-2"
                     style={{ backgroundColor: scheme.primary }}
                   />
                   <span className="text-sm font-medium text-gray-900 dark:text-white">
@@ -144,19 +146,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
                 <div className="flex space-x-1">
                   <div
-                    className="w-6 h-3 rounded"
+                    className="w-8 h-4 rounded"
                     style={{ backgroundColor: scheme.primary }}
                   />
                   <div
-                    className="w-6 h-3 rounded"
+                    className="w-8 h-4 rounded"
                     style={{ backgroundColor: scheme.secondary }}
                   />
                   <div
-                    className="w-6 h-3 rounded"
+                    className="w-8 h-4 rounded"
                     style={{ backgroundColor: scheme.accent }}
                   />
                   <div
-                    className="w-6 h-3 rounded"
+                    className="w-8 h-4 rounded"
                     style={{ backgroundColor: scheme.neutral }}
                   />
                 </div>
@@ -165,11 +167,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
             <button
               onClick={() => setShowCustomColorPicker(!showCustomColorPicker)}
-              className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center ${
+              className={`p-4 rounded-lg border-2 transition-all flex flex-col items-center justify-center focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
                 customColors
                   ? 'border-indigo-500 ring-2 ring-indigo-200 dark:ring-indigo-900'
                   : 'border-gray-200 dark:border-gray-600 hover:border-indigo-300 dark:hover:border-indigo-700'
               }`}
+              aria-expanded={showCustomColorPicker}
+              aria-label="自定义配色方案"
             >
               <Shapes className="w-6 h-6 text-gray-400 mb-1" />
               <span className="text-sm font-medium text-gray-900 dark:text-white">
@@ -181,7 +185,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           {showCustomColorPicker && (
             <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg space-y-4">
               <h4 className="font-medium text-gray-900 dark:text-white">自定义颜色</h4>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
                     主色
@@ -191,9 +195,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="color"
                       value={tempCustomColors.primary || currentScheme.primary}
                       onChange={(e) => handleCustomColorChange('primary', e.target.value)}
-                      className="w-10 h-10 p-1 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                      className="w-12 h-12 p-1 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                      aria-label="选择主色"
                     />
-                    <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                    <span className="ml-3 text-sm text-gray-700 dark:text-gray-300">
                       {tempCustomColors.primary || currentScheme.primary}
                     </span>
                   </div>
@@ -208,9 +213,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="color"
                       value={tempCustomColors.secondary || currentScheme.secondary}
                       onChange={(e) => handleCustomColorChange('secondary', e.target.value)}
-                      className="w-10 h-10 p-1 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                      className="w-12 h-12 p-1 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                      aria-label="选择次色"
                     />
-                    <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                    <span className="ml-3 text-sm text-gray-700 dark:text-gray-300">
                       {tempCustomColors.secondary || currentScheme.secondary}
                     </span>
                   </div>
@@ -225,9 +231,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="color"
                       value={tempCustomColors.accent || currentScheme.accent}
                       onChange={(e) => handleCustomColorChange('accent', e.target.value)}
-                      className="w-10 h-10 p-1 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                      className="w-12 h-12 p-1 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                      aria-label="选择强调色"
                     />
-                    <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                    <span className="ml-3 text-sm text-gray-700 dark:text-gray-300">
                       {tempCustomColors.accent || currentScheme.accent}
                     </span>
                   </div>
@@ -242,9 +249,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="color"
                       value={tempCustomColors.neutral || currentScheme.neutral}
                       onChange={(e) => handleCustomColorChange('neutral', e.target.value)}
-                      className="w-10 h-10 p-1 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                      className="w-12 h-12 p-1 border border-gray-300 dark:border-gray-600 rounded cursor-pointer"
+                      aria-label="选择中性色"
                     />
-                    <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                    <span className="ml-3 text-sm text-gray-700 dark:text-gray-300">
                       {tempCustomColors.neutral || currentScheme.neutral}
                     </span>
                   </div>
@@ -253,7 +261,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
               <button
                 onClick={saveCustomColors}
-                className="w-full px-4 py-2 text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors"
+                className="w-full px-4 py-3 text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
+                aria-label="保存自定义颜色"
               >
                 保存自定义颜色
               </button>
@@ -268,7 +277,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             圆角设置
           </h3>
 
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               { name: '无圆角', value: 'rounded-none', example: 'square' },
               { name: '小圆角', value: 'rounded-sm', example: 'small' },
@@ -278,24 +287,25 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <button
                 key={item.value}
                 onClick={() => handleBorderRadiusChange(item.value)}
-                className={`p-3 flex flex-col items-center justify-center border-2 ${
+                className={`p-4 flex flex-col items-center justify-center border-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
                   borderRadius === item.value
                     ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
                     : 'border-gray-200 dark:border-gray-600 hover:border-indigo-300 dark:hover:border-indigo-700'
                 }`}
+                aria-label={`选择${item.name}圆角`}
               >
-                <div className="w-12 h-8 mb-1 flex items-center justify-center">
+                <div className="w-16 h-10 mb-2 flex items-center justify-center">
                   {item.example === 'square' ? (
-                    <div className="w-8 h-6 bg-gray-300 dark:bg-gray-600"></div>
+                    <div className="w-12 h-8 bg-gray-300 dark:bg-gray-600"></div>
                   ) : item.example === 'small' ? (
-                    <div className="w-8 h-6 bg-gray-300 dark:bg-gray-600 rounded-sm"></div>
+                    <div className="w-12 h-8 bg-gray-300 dark:bg-gray-600 rounded-sm"></div>
                   ) : item.example === 'default' ? (
-                    <div className="w-8 h-6 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                    <div className="w-12 h-8 bg-gray-300 dark:bg-gray-600 rounded"></div>
                   ) : (
-                    <div className="w-8 h-6 bg-gray-300 dark:bg-gray-600 rounded-lg"></div>
+                    <div className="w-12 h-8 bg-gray-300 dark:bg-gray-600 rounded-lg"></div>
                   )}
                 </div>
-                <span className="text-xs text-gray-700 dark:text-gray-300">{item.name}</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">{item.name}</span>
               </button>
             ))}
           </div>
@@ -305,7 +315,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       <div className="flex justify-end mt-6">
         <button
           onClick={onClose}
-          className="px-4 py-2 text-gray-700 bg-gray-100 dark:text-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors"
+          className="px-6 py-3 text-gray-700 bg-gray-100 dark:text-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-200 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors"
+          aria-label="关闭设置"
         >
           关闭
         </button>
