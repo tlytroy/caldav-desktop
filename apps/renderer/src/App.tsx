@@ -70,7 +70,7 @@ export default function App() {
       <div className="min-h-screen bg-gray-50 dark:bg-neutral-800 p-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white">
-            Radicale Desktop Calendar
+            CalDAV Desktop
           </h1>
           <div className="flex items-center space-x-2">
             <ThemeToggle />

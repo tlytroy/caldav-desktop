@@ -9,6 +9,7 @@ if (require('electron-squirrel-startup')) {
 const createWindow = () => {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
+    title: 'CalDAV Desktop',
     width: 1200,
     height: 800,
     webPreferences: {
@@ -23,7 +24,7 @@ const createWindow = () => {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../renderer/dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
   }
 };
 

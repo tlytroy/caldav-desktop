@@ -298,7 +298,7 @@ calendarRouter.post("/events", async (req, res) => {
     const icsLines = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Radicale Desktop//EN",
+      "PRODID:-//CalDAV Desktop//EN",
       "BEGIN:VEVENT",
       `UID:${uid}`,
       `DTSTAMP:${dtstamp}`,
@@ -451,7 +451,7 @@ calendarRouter.put("/events/:uid", async (req, res) => {
     const icsLines = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
-      "PRODID:-//Radicale Desktop//EN",
+      "PRODID:-//CalDAV Desktop//EN",
       "BEGIN:VEVENT",
       `UID:${uid}`,
       `DTSTAMP:${dtstamp}`,
