@@ -1,5 +1,5 @@
 {
-  "name": "renderer",
+  "name": "caldav-renderer",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

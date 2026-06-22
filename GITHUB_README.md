@@ -4,7 +4,7 @@ A cross-platform desktop calendar application with full CalDAV support and moder
 
 Built with the help of AI assistance, this project addresses the lack of standalone CalDAV calendar applications on Windows, providing a lightweight alternative to email clients that bundle calendar functionality.
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Status](https://img.shields.io/badge/status-production%20ready-green)
+![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Status](https://img.shields.io/badge/status-production%20ready-green) ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## ✨ Features
 
@@ -22,6 +22,17 @@ Built with the help of AI assistance, this project addresses the lack of standal
   - Responsive layout
 - **Cross-Platform**: Linux, Windows, macOS (packaged as Electron app)
 
+## 📸 Screenshots
+
+![Main Interface](screenshots/main-interface.png)
+*Main calendar interface with Morandi color scheme*
+
+![Settings Panel](screenshots/settings-panel.png)
+*Customizable settings with theme options*
+
+![Event Editor](screenshots/event-editor.png)
+*Event creation with advanced features*
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -32,6 +43,10 @@ Built with the help of AI assistance, this project addresses the lack of standal
 ### Installation & Development
 
 ```bash
+# Clone the repository
+git clone https://github.com/yourusername/caldav-desktop.git
+cd caldav-desktop
+
 # Install dependencies
 pnpm install
 
@@ -154,18 +169,29 @@ radicale-desktop/
 - Complex timezones
 - Multiple account support
 
-## 📄 License
-
-[Add your license here]
-
-## 🤝 Contributing
-
-Contributions welcome! See existing code style and structure.
-
 ## 🤖 AI-Assisted Development
 
 This project was developed with the help of AI coding assistants, demonstrating how modern AI tools can accelerate software development while maintaining high code quality and best practices.
 
----
+## 📄 License
 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+1. Fork it (https://github.com/yourusername/caldav-desktop/fork)
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 🙏 Acknowledgments
+
+- Thanks to the Radicale project for providing an excellent CalDAV server
+- Thanks to the Electron, React, and FullCalendar communities
+- Thanks to AI coding assistants for accelerating development
+
+---
 **Last Updated**: 2026-06-22

@@ -28,10 +28,10 @@ pnpm package:linux
 
 Generated in `apps/desktop/dist-electron/`:
 
-- `Radicale Desktop Calendar-0.1.0-linux.AppImage` (~100MB)
+- `CalDAV-Desktop-0.1.0-linux.AppImage` (~100MB)
   - Single executable file, no installation needed
-  - Run: `./Radicale\ Desktop\ Calendar-0.1.0-linux.AppImage`
-- `Radicale Desktop Calendar-0.1.0-linux.tar.gz` (~95MB)
+  - Run: `./CalDAV-Desktop-0.1.0-linux.AppImage`
+- `CalDAV-Desktop-0.1.0-linux.tar.gz` (~95MB)
   - Portable compressed archive
   - Extract and run binary directly
 
@@ -72,10 +72,10 @@ pnpm package:win
 
 Generated in `apps/desktop/dist-electron/`:
 
-- `Radicale Desktop Calendar Setup 0.1.0.exe` (~150MB)
+- `CalDAV Desktop Setup 0.1.0.exe` (~150MB)
   - Windows installer with wizard
   - Traditional installation method
-- `Radicale Desktop Calendar 0.1.0-win.zip` (~140MB)
+- `CalDAV-Desktop-0.1.0-win.zip` (~140MB)
   - Portable version, no installation needed
   - Extract and run `.exe` directly
 
@@ -141,10 +141,10 @@ pnpm package:mac
 
 Generated in `apps/desktop/dist-electron/`:
 
-- `Radicale Desktop Calendar 0.1.0.dmg` (~120MB)
+- `CalDAV Desktop 0.1.0.dmg` (~120MB)
   - Standard macOS installer
   - Drag app to Applications folder
-- `Radicale Desktop Calendar 0.1.0-mac.zip` (~110MB)
+- `CalDAV-Desktop-0.1.0-mac.zip` (~110MB)
   - Portable zip archive
   - Extract and run directly
 
@@ -164,26 +164,26 @@ Generated in `apps/desktop/dist-electron/`:
 
 ```bash
 # Linux (AppImage)
-./Radicale\ Desktop\ Calendar-0.1.0-linux.AppImage
+./CalDAV-Desktop-0.1.0-linux.AppImage
 
 # Linux (tar.gz)
-tar xzf Radicale\ Desktop\ Calendar-0.1.0-linux.tar.gz
-./Radicale\ Desktop\ Calendar
+tar xzf CalDAV-Desktop-0.1.0-linux.tar.gz
+./CalDAV-Desktop
 
 # Windows (.exe installer)
 # Double-click the .exe file
 
 # Windows (.zip portable)
-unzip "Radicale Desktop Calendar-0.1.0-win.zip"
-cd "Radicale Desktop Calendar-0.1.0-win"
-Radicale\ Desktop\ Calendar.exe
+unzip "CalDAV-Desktop-0.1.0-win.zip"
+cd "CalDAV-Desktop-0.1.0-win"
+CalDAV-Desktop.exe
 
 # macOS (.dmg)
 # Double-click .dmg, drag app to Applications
 
 # macOS (.zip)
-unzip "Radicale Desktop Calendar 0.1.0-mac.zip"
-open "Radicale Desktop Calendar.app"
+unzip "CalDAV Desktop 0.1.0-mac.zip"
+open "CalDAV Desktop.app"
 ```
 
 ### Validation Checklist
@@ -310,7 +310,7 @@ jobs:
 
 **App won't start after installation**
 
-- Clear application cache: `~/.config/Radicale Desktop Calendar/`
+- Clear application cache: `~/.config/CalDAV Desktop/`
 - Check logs in dev tools
 - Verify Radicale server is accessible
 

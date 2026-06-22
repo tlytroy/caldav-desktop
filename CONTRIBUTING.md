@@ -1,124 +1,124 @@
-# 贡献指南
+# Contribution Guidelines
 
-感谢您对 Radicale Desktop Calendar 项目的兴趣！我们欢迎各种形式的贡献。
+Thank you for your interest in the CalDAV Desktop project! We welcome contributions of all kinds.
 
-## 🎯 贡献方式
+## 🎯 Ways to Contribute
 
-### 报告问题
-- 使用 GitHub Issues 报告 bug
-- 请提供详细的复现步骤
-- 包含您的操作系统和版本信息
+### Reporting Issues
+- Use GitHub Issues to report bugs
+- Provide detailed reproduction steps
+- Include your operating system and version information
 
-### 功能请求
-- 在 Issues 中描述您想要的功能
-- 解释该功能如何改善用户体验
-- 如果可能，提供实现思路
+### Feature Requests
+- Describe the feature you want in Issues
+- Explain how the feature would improve user experience
+- Provide implementation ideas if possible
 
-### 代码贡献
-1. Fork 项目仓库
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
+### Code Contributions
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-## 🛠️ 开发环境设置
+## 🛠️ Development Environment Setup
 
-### 前提条件
+### Prerequisites
 - Node.js 20+
 - pnpm
 
-### 安装步骤
+### Installation Steps
 ```bash
-# 克隆仓库
-git clone https://github.com/yourusername/radicale-desktop.git
-cd radicale-desktop
+# Clone the repository
+git clone https://github.com/yourusername/caldav-desktop.git
+cd caldav-desktop
 
-# 安装依赖
+# Install dependencies
 pnpm install
 
-# 启动开发服务器
+# Start development servers
 pnpm dev
 ```
 
-## 📝 代码规范
+## 📝 Code Standards
 
 ### TypeScript
-- 遵循严格的类型检查
-- 使用有意义的变量和函数命名
-- 添加必要的注释
+- Follow strict type checking
+- Use meaningful variable and function names
+- Add necessary comments
 
 ### React
-- 使用函数组件和 Hooks
-- 遵循组件复用原则
-- 保持组件单一职责
+- Use functional components and Hooks
+- Follow component reuse principles
+- Maintain single responsibility principle
 
-### 提交信息
-- 使用清晰的提交信息
-- 遵循 conventional commits 格式
-- 每次提交应该只包含一个逻辑变更
+### Commit Messages
+- Use clear commit messages
+- Follow conventional commits format
+- Each commit should contain only one logical change
 
-## 🧪 测试
+## 🧪 Testing
 
-### 运行测试
+### Running Tests
 ```bash
-# 运行 API 测试
+# Run API tests
 ./run-tests.sh
 
-# 运行前端测试（如果有的话）
+# Run frontend tests (if any)
 pnpm test
 ```
 
-### 编写测试
-- 为新功能添加测试用例
-- 确保所有测试通过后再提交
-- 测试应该覆盖主要的功能路径
+### Writing Tests
+- Add test cases for new features
+- Ensure all tests pass before committing
+- Tests should cover major functionality paths
 
-## 📚 文档
+## 📚 Documentation
 
-### 更新文档
-- 修改代码时同步更新相关文档
-- 保持文档与代码的一致性
-- 使用清晰易懂的语言
+### Updating Documentation
+- Update related documentation when modifying code
+- Maintain consistency between documentation and code
+- Use clear and understandable language
 
-## 🎨 设计原则
+## 🎨 Design Principles
 
-### 用户体验
-- 保持界面简洁直观
-- 遵循无障碍设计原则
-- 确保跨平台一致性
+### User Experience
+- Keep the interface simple and intuitive
+- Follow accessibility design principles
+- Ensure cross-platform consistency
 
-### 性能
-- 优化加载时间和响应速度
-- 减少不必要的资源消耗
-- 实施适当的缓存策略
+### Performance
+- Optimize loading times and response speed
+- Reduce unnecessary resource consumption
+- Implement appropriate caching strategies
 
-## 🚀 发布流程
+## 🚀 Release Process
 
-1. 更新版本号
-2. 更新 CHANGELOG.md
-3. 创建发布标签
-4. 构建发布包
-5. 发布到 GitHub Releases
+1. Update version number
+2. Update CHANGELOG.md
+3. Create release tag
+4. Build release packages
+5. Publish to GitHub Releases
 
-## 🤖 AI 辅助开发
+## 🤖 AI-Assisted Development
 
-本项目在开发过程中使用了 AI 编程助手来提高开发效率，但我们始终：
-- 保持对代码质量的严格要求
-- 进行人工代码审查
-- 确保所有代码符合项目规范
-- 维护清晰的开发文档
+This project uses AI programming assistants during development to improve efficiency, but we always:
+- Maintain strict code quality requirements
+- Conduct manual code reviews
+- Ensure all code meets project standards
+- Maintain clear development documentation
 
-## 💬 社区行为准则
+## 💬 Community Code of Conduct
 
-- 保持尊重和专业的态度
-- 提供建设性的反馈
-- 帮助新手开发者
-- 遵守开源社区的最佳实践
+- Maintain respectful and professional attitudes
+- Provide constructive feedback
+- Help novice developers
+- Follow open-source community best practices
 
-## 📞 联系方式
+## 📞 Contact
 
-如有任何问题，请通过以下方式联系我们：
+If you have any questions, please contact us through:
 - GitHub Issues
-- 项目维护者邮箱
+- Project maintainer email
 
-再次感谢您的贡献！
+Thank you again for your contribution!

@@ -1,4 +1,4 @@
-# Radicale Desktop Calendar 任务列表
+# Calendex 任务列表
 
 ## 🎯 当前目标 (v0.2.0 开发阶段)
 
