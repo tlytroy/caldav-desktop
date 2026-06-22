@@ -1,0 +1,15 @@
+{
+  "name": "caldav-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A cross-platform desktop calendar application with full CalDAV support and modern UI design",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.6"
+  }
+}
