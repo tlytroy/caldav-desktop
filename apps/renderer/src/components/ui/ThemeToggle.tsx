@@ -1,18 +1,27 @@
 import { useEffect } from 'react';
 import { Moon, Sun } from 'lucide-react';
-import { useThemeStore } from '../../store/themeStore';
+import { useThemeStore, getCurrentColors } from '../../store/themeStore';
 
 export function ThemeToggle() {
-  const { isDarkMode, toggleTheme } = useThemeStore();
+  const themeState = useThemeStore();
+  const { isDarkMode, toggleTheme } = themeState;
 
-  // 当主题状态改变时，更新DOM class
+  // 当主题状态改变时，更新DOM class和CSS变量
   useEffect(() => {
+    // 更新暗色模式class
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
-  }, [isDarkMode]);
+
+    // 更新CSS变量
+    const colors = getCurrentColors(themeState);
+    const root = document.documentElement;
+    Object.entries(colors).forEach(([key, value]) => {
+      root.style.setProperty(key, value);
+    });
+  }, [isDarkMode, themeState]);
 
   return (
     <button

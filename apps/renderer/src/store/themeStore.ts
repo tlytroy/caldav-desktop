@@ -84,5 +84,16 @@ export const getCurrentColorScheme = (state: ThemeState): ColorScheme => {
       neutral: state.customColors.neutral || morandiSchemes[state.colorScheme].neutral,
     };
   }
-  return morandiSchemes[state.colorScheme];
+  return morandiSchemes[state.colorScheme] || morandiSchemes.classic;
+};
+
+// 获取当前颜色值（用于CSS变量）
+export const getCurrentColors = (state: ThemeState): Record<string, string> => {
+  const scheme = getCurrentColorScheme(state);
+  return {
+    '--color-primary': scheme.primary,
+    '--color-secondary': scheme.secondary,
+    '--color-accent': scheme.accent,
+    '--color-neutral': scheme.neutral
+  };
 };
