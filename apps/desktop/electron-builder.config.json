@@ -1,0 +1,30 @@
+{
+  "productName": "Radicale Desktop Calendar",
+  "appId": "com.radicale.desktop.calendar",
+  "directories": {
+    "output": "dist-electron"
+  },
+  "files": [
+    "dist/**/*",
+    "node_modules/**/*",
+    "package.json",
+    "!**/*.ts",
+    "!*.map",
+    "!package.json.orig"
+  ],
+  "win": {
+    "target": [
+      "zip"
+    ],
+    "artifactName": "${productName}-${version}-win.${ext}"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "tar.gz"
+    ],
+    "artifactName": "${productName}-${version}-linux.${ext}",
+    "category": "Office"
+  },
+  "publish": null
+}

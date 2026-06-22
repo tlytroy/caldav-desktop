@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.DS_Store
+*.log
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+pnpm-lock.yaml
