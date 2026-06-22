@@ -1,0 +1,21 @@
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px;
+}
+
+.touch-optimized-modal {
+  margin: 16px;
+}
+
+@media (max-width: 768px) {
+  .touch-target {
+    min-height: 48px;
+    min-width: 48px;
+    padding: 12px;
+  }
+
+  .touch-optimized-modal {
+    margin: 8px;
+  }
+}

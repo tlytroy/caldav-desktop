@@ -1,6 +1,6 @@
 {
   "name": "CalDAV Calendar",
-  "short_name": "CalDAVar",
+  "short_name": "CalDAV",
   "description": "Cross-platform calendar application with full CalDAV support",
   "start_url": ".",
   "display": "standalone",
