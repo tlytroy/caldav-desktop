@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useThemeStore, morandiSchemes, getCurrentColorScheme } from '../../store/themeStore';
+import { useThemeStore, morandiSchemes, getCurrentColorScheme, getCurrentColors } from '../../store/themeStore';
 import { Palette, Sun, Moon, Square, Shapes } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 
@@ -41,6 +41,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setColorScheme(scheme);
     setCustomColors(null);
     setShowCustomColorPicker(false);
+
+    // 更新CSS变量
+    setTimeout(() => {
+      const themeState = useThemeStore.getState();
+      const colors = getCurrentColors(themeState);
+      const root = document.documentElement;
+      Object.entries(colors).forEach(([key, value]) => {
+        root.style.setProperty(key, value);
+      });
+    }, 0);
   };
 
   const handleCustomColorChange = (key: string, value: string) => {
@@ -48,8 +58,23 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   };
 
   const saveCustomColors = () => {
-    setCustomColors(tempCustomColors);
+    // 过滤掉空值
+    const filteredColors = Object.fromEntries(
+      Object.entries(tempCustomColors).filter(([_, value]) => value !== '')
+    );
+
+    setCustomColors(filteredColors);
     setColorScheme('custom');
+
+    // 更新CSS变量
+    setTimeout(() => {
+      const themeState = useThemeStore.getState();
+      const colors = getCurrentColors(themeState);
+      const root = document.documentElement;
+      Object.entries(colors).forEach(([key, value]) => {
+        root.style.setProperty(key, value);
+      });
+    }, 0);
   };
 
   const handleBorderRadiusChange = (radius: string) => {
