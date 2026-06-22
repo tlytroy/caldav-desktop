@@ -1,0 +1,27 @@
+{
+  "name": "desktop-app",
+  "version": "0.1.0",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "concurrently \"pnpm run dev:main\" \"pnpm run dev:renderer\"",
+    "dev:main": "tsx watch main.ts",
+    "dev:renderer": "cd ../renderer && pnpm dev",
+    "build": "pnpm run build:main && pnpm run build:renderer",
+    "build:main": "tsc",
+    "build:renderer": "cd ../renderer && pnpm build",
+    "package": "electron-builder --config electron-builder.config.json",
+    "package:win": "electron-builder --config electron-builder.config.json --win",
+    "package:mac": "electron-builder --config electron-builder.config.json --mac",
+    "package:linux": "electron-builder --config electron-builder.config.json --linux"
+  },
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.0",
+    "concurrently": "^8.2.2",
+    "electron-builder": "^24.9.1"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "radicale-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A desktop calendar application for Radicale servers, similar to Fantastical",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.6"
+  }
+}
