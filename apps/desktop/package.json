@@ -6,16 +6,19 @@
     "dev": "concurrently \"pnpm run dev:main\" \"pnpm run dev:renderer\"",
     "dev:main": "tsx watch main.ts",
     "dev:renderer": "cd ../renderer && pnpm dev",
-    "build": "pnpm run build:main && pnpm run build:renderer",
+    "build": "pnpm run build:main && pnpm run build:renderer && pnpm run build:copy-renderer",
     "build:main": "tsc",
     "build:renderer": "cd ../renderer && pnpm build",
+    "build:copy-renderer": "node -e \"const fs=require('fs');const s='../renderer/dist',d='dist/renderer';fs.rmSync(d,{recursive:true,force:true});fs.cpSync(s,d,{recursive:true})\"",
     "package": "electron-builder --config electron-builder.config.json",
     "package:win": "electron-builder --config electron-builder.config.json --win",
     "package:mac": "electron-builder --config electron-builder.config.json --mac",
     "package:linux": "electron-builder --config electron-builder.config.json --linux"
   },
   "dependencies": {
-    "electron-squirrel-startup": "^1.0.0"
+    "electron-squirrel-startup": "^1.0.0",
+    "debug": "^4.3.4",
+    "ms": "^2.1.3"
   },
   "devDependencies": {
     "electron": "^28.0.0",

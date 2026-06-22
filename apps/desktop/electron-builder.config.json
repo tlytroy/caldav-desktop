@@ -12,19 +12,20 @@
     "!*.map",
     "!package.json.orig"
   ],
+  "asarUnpack": ["node_modules/ms/**/*"],
+  "npmRebuild": false,
   "win": {
-    "target": [
-      "zip"
-    ],
+    "target": ["nsis", "zip"],
     "artifactName": "${productName}-${version}-win.${ext}"
   },
   "linux": {
-    "target": [
-      "AppImage",
-      "tar.gz"
-    ],
+    "target": ["AppImage", "tar.gz"],
     "artifactName": "${productName}-${version}-linux.${ext}",
     "category": "Office"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
   },
   "publish": null
 }

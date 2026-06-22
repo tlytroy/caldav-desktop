@@ -20,7 +20,7 @@ app.use("/api/calendar", calendarRouter);
 
 async function start() {
   try {
-    // Test connection to Radicale
+    // Test connection to CalDAV server
     await initializeClient();
 
     app.listen(PORT, () => {

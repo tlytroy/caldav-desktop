@@ -92,14 +92,14 @@ export async function initializeClient() {
 
     const calendars = await davClient.fetchCalendars();
     console.log(
-      `✓ Connected to Radicale. Found ${calendars.length} calendar(s)`
+      `✓ Connected to CalDAV server. Found ${calendars.length} calendar(s)`
     );
     calendars.forEach((cal: any) => {
       console.log(`  - ${cal.displayName || cal.url}`);
     });
     return calendars;
   } catch (error) {
-    console.warn("⚠ Warning: Could not connect to Radicale");
+    console.warn("⚠ Warning: Could not connect to CalDAV server");
     console.warn(`  URL: ${currentConfig.url}`);
     console.warn(`  User: ${currentConfig.username}`);
     console.warn(
