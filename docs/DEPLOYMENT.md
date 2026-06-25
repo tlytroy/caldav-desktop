@@ -193,6 +193,7 @@ open "CalDAV Desktop.app"
 - ✅ Event creation works
 - ✅ Event editing/deletion works
 - ✅ Theme/color settings persist
+- ✅ Sync management features work (status bar, intervals, manual sync)
 - ✅ No missing dependencies errors
 
 ---

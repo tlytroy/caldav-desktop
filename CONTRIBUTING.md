@@ -51,6 +51,7 @@ pnpm dev
 - Use functional components and Hooks
 - Follow component reuse principles
 - Maintain single responsibility principle
+- Implement proper state management with Zustand
 
 ### Commit Messages
 - Use clear commit messages
@@ -79,6 +80,15 @@ pnpm test
 - Update related documentation when modifying code
 - Maintain consistency between documentation and code
 - Use clear and understandable language
+- Create new documentation files for major features (see docs/SYNC_MANAGEMENT.md as example)
+
+### Documentation Structure
+- README.md: Project overview and quick start
+- CHANGELOG.md: Version history and feature updates
+- docs/TESTING.md: Test procedures and results
+- docs/DEPLOYMENT.md: Build and packaging guides
+- docs/SYNC_MANAGEMENT.md: Sync system documentation (new)
+- docs/*.md: Other specialized guides
 
 ## 🎨 Design Principles
 
@@ -91,6 +101,7 @@ pnpm test
 - Optimize loading times and response speed
 - Reduce unnecessary resource consumption
 - Implement appropriate caching strategies
+- Use smart sync management to minimize network requests
 
 ## 🚀 Release Process
 
