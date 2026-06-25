@@ -6,6 +6,7 @@ import { GlobalErrorBoundary } from './components/ui/ErrorBoundary';
 import { Modal } from './components/ui/Modal';
 import { ThemeToggle } from './components/ui/ThemeToggle';
 import { SettingsModal } from './components/settings/SettingsModal';
+import { FilterBar } from './components/ui/FilterBar';
 import { Settings, Loader2 } from 'lucide-react';
 import { testConnection, saveConfig } from './api/calendar';
 import type { CalDAVConfig, TestConnectionResult } from './types';
@@ -20,7 +21,7 @@ export default function App() {
     refreshCalendars
   } = useCalendars();
 
-  const { setConfig } = useCalendarStore();
+  const { setConfig, setEventFilter } = useCalendarStore();
 
   const { isConfigModalOpen } = useCalendarStore();
   const [isSettingsModalOpen, setIsSettingsModalOpen] = React.useState(false);
@@ -30,7 +31,7 @@ export default function App() {
   const handleTestConnection = async () => {
     setConfigLoading(true);
     setTestResult(null);
-    
+
     try {
       const result = await testConnection(config as CalDAVConfig);
       setTestResult(result);
@@ -47,11 +48,11 @@ export default function App() {
   const handleSaveConfig = async () => {
     setConfigLoading(true);
     setTestResult(null);
-    
+
     try {
       const result = await saveConfig(config as CalDAVConfig);
       setTestResult({ success: true, message: result.message });
-      
+
       // 关闭模态框并刷新日历
       setIsConfigModalOpen(false);
       await refreshCalendars();
@@ -64,6 +65,8 @@ export default function App() {
       setConfigLoading(false);
     }
   };
+
+  // 过滤事件的逻辑在 Calendar 组件中实现
 
   return (
     <GlobalErrorBoundary>
@@ -109,6 +112,11 @@ export default function App() {
               ))}
             </select>
           </div>
+        )}
+
+        {/* 搜索和过滤栏 */}
+        {calendars.length > 0 && selectedCalendarUrl && (
+          <FilterBar onFilterChange={setEventFilter} />
         )}
 
         {/* 日历视图 */}
