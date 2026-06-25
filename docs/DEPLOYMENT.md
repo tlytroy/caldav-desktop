@@ -330,4 +330,27 @@ jobs:
 
 ---
 
-**Last Updated**: 2026-06-22
+**Last Updated**: 2026-06-25
+
+## 📢 Major Update - June 25, 2026
+
+### 🧹 Repository Optimization
+
+The repository has been significantly optimized by removing large build artifacts from Git history. This improves:
+
+- **Clone Speed**: Faster repository cloning
+- **Storage Efficiency**: Reduced disk space usage
+- **Performance**: Better Git operation performance
+
+### 📦 Build Artifact Distribution Change
+
+**Important Notice**: Build artifacts (AppImage, .exe, .dmg, etc.) are no longer stored in the main repository. They are now distributed exclusively through:
+
+1. **GitHub Releases**: https://github.com/tlytroy/caldav-desktop/releases
+2. **Manual Build**: Follow build instructions in this document
+
+This change ensures:
+- Cleaner repository history
+- Faster development workflow
+- More reliable CI/CD processes
+- Better separation of source code and binaries

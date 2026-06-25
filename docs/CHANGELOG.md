@@ -207,5 +207,23 @@ cd apps/renderer && pnpm dev    # Terminal 2
 
 ---
 
+## 📝 Recent Updates (June 25, 2026)
+
+### 🧹 Repository Maintenance
+
+- **Git History Optimization**: Large build artifacts (>50MB) removed from Git history
+- **Repository Cleanup**: Improved clone performance and reduced storage requirements
+- **Documentation Updates**: All guides synchronized with latest code changes
+
+### 🛠️ Build Artifact Management
+
+- **Large File Removal**: Removed oversized binaries from Git history:
+  - Linux AppImage (~100MB)
+  - Linux tar.gz (~95MB)
+  - Windows executable (~170MB)
+  - macOS applications
+- **Future Distribution**: Build artifacts now distributed via releases/tags only
+- **Development Workflow**: Cleaner repository for contributors and developers
+
 **Generated**: 2026-06-22
 **Maintained by**: CalDAV Desktop Team
