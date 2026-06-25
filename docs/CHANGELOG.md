@@ -17,6 +17,26 @@ All notable changes to CalDAV Desktop are documented here.
   - All-day event support
   - RFC 5545 standard compliance
 
+#### ⚡ Smart Sync Features (New in v0.1.0)
+
+**Intelligent Caching System**
+- Local event caching for improved performance
+- Cache expiration management (1-hour TTL)
+- Offline access to cached events
+- Seamless cache refresh on sync
+
+**Flexible Sync Management**
+- Configurable sync intervals: 5/10/30 minutes or manual
+- Manual sync button for immediate updates
+- Automatic sync after event modifications
+- Sync status visualization in bottom status bar
+
+**User Experience Enhancements**
+- Real-time sync status indicators
+- Last sync time display
+- Error messaging for sync failures
+- Non-blocking sync operations
+
 #### 🎨 Design System (New in v0.1.0)
 
 **Morandi Color Schemes**
@@ -48,6 +68,7 @@ All notable changes to CalDAV Desktop are documented here.
 - Responsive design for various screen sizes
 - Intuitive event editing form
 - Clear error messages and feedback
+- Bottom sync status bar for real-time sync information
 
 #### 🔧 Technical Improvements
 
@@ -59,6 +80,15 @@ All notable changes to CalDAV Desktop are documented here.
 - Proper HTTP status codes (201 for creation, 200 for updates)
 - Event UID tracking for CRUD operations
 - CORS middleware for frontend communication
+
+**Frontend Architecture**
+
+- TypeScript 100% type coverage
+- Zustand state management with persistence
+- Component-based architecture
+- CSS-in-JS with Tailwind configuration
+- Automated theme persistence
+- Smart sync state management with localStorage persistence
 
 **Frontend**
 
@@ -126,6 +156,8 @@ All notable changes to CalDAV Desktop are documented here.
 - Import/export functionality (iCalendar format)
 - Performance optimizations
 - Additional UI polish
+- Enhanced offline mode with extended caching
+- Conflict resolution for sync conflicts
 
 ### 📋 Future Roadmap (v1.0+)
 

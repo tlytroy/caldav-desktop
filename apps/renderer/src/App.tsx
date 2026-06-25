@@ -7,6 +7,7 @@ import { Modal } from './components/ui/Modal';
 import { ThemeToggle } from './components/ui/ThemeToggle';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { FilterBar } from './components/ui/FilterBar';
+import { SyncStatusBar } from './components/ui/SyncStatusBar';
 import { Settings, Loader2 } from 'lucide-react';
 import { testConnection, saveConfig } from './api/calendar';
 import type { CalDAVConfig, TestConnectionResult } from './types';
@@ -27,6 +28,7 @@ export default function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = React.useState(false);
   const [testResult, setTestResult] = React.useState<TestConnectionResult | null>(null);
   const [configLoading, setConfigLoading] = React.useState(false);
+  const [manualSync, setManualSync] = React.useState(false);
 
   const handleTestConnection = async () => {
     setConfigLoading(true);
@@ -70,7 +72,7 @@ export default function App() {
 
   return (
     <GlobalErrorBoundary>
-      <div className="min-h-screen bg-gray-50 dark:bg-neutral-800 p-4 sm:p-8">
+      <div className="min-h-screen bg-gray-50 dark:bg-neutral-800 p-4 sm:p-8 pb-16">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 sm:mb-8 gap-4">
           <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">
             CalDAV Desktop
@@ -131,6 +133,16 @@ export default function App() {
             </div>
           )}
         </div>
+
+        {/* 同步状态栏 */}
+        {selectedCalendarUrl && (
+          <SyncStatusBar
+            onManualSync={() => setManualSync(true)}
+            isSyncing={manualSync}
+            syncStatus={manualSync ? "syncing" : "idle"}
+            lastSyncTime={Date.now()}
+          />
+        )}
 
         {/* 设置模态框 */}
         <SettingsModal

@@ -9,6 +9,11 @@ Built with the help of AI assistance, this project addresses the lack of standal
 ## ✨ Features
 
 - **CalDAV Sync**: Full synchronization with Radicale servers (RFC 5545 compliant)
+- **Smart Sync Management**: 
+  - Configurable sync intervals (5/10/30 minutes or manual)
+  - Local caching for improved performance
+  - Manual sync button for immediate updates
+  - Sync status visualization in bottom status bar
 - **Event Management**: Create, edit, delete events with full CRUD operations
 - **Advanced Features**:
   - Event categories for organization
@@ -214,7 +219,7 @@ radicale-desktop/
 - [ ] Windows/macOS packaging improvements
 - [ ] User feedback collection
 - [ ] Performance monitoring
-- [ ] v0.2: Advanced filtering, event search, more themes
+- [ ] v0.2: Advanced filtering, event search, more themes, offline mode enhancements
 
 ## 📝 Not in v1
 

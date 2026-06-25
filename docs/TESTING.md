@@ -99,12 +99,22 @@ Then visit http://localhost:5173/ in your browser.
 - ✅ Border-radius selector (4 levels)
 - ✅ Settings persist across refresh
 
+### Sync Management
+
+- ✅ Bottom sync status bar displays correctly
+- ✅ Sync interval selector works (5/10/30 min options)
+- ✅ Manual sync button triggers immediate sync
+- ✅ Sync status indicators show real-time status
+- ✅ Last sync time displays properly
+- ✅ Cache management works after event changes
+
 ### User Experience
 
 - ✅ Responsive design
 - ✅ Error messages clear
 - ✅ Smooth interactions
 - ✅ Visual feedback on actions
+- ✅ Non-blocking sync operations
 
 ---
 

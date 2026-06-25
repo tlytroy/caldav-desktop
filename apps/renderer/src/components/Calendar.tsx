@@ -20,7 +20,13 @@ interface CalendarProps {
 }
 
 export default function Calendar({ calendarUrl }: CalendarProps) {
-  const { events, loadingState, error, loadEvents } = useCalendarEvents(calendarUrl || null);
+  const {
+    events,
+    loadingState,
+    error,
+    loadEvents,
+    forceSync
+  } = useCalendarEvents(calendarUrl || null);
   const { eventFilter } = useCalendarStore();
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -138,7 +144,8 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
           recurrence: formData.recurrence
         });
       }
-      await loadEvents(); // 重新加载事件
+      // 使用forceSync强制同步而不是loadEvents
+      await forceSync();
       setShowModal(false);
     } catch (err) {
       console.error('保存事件失败:', err);
@@ -157,7 +164,8 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
     if (eventToDelete?.id && calendarUrl) {
       try {
         await deleteCalendarEvent(eventToDelete.id, calendarUrl);
-        await loadEvents(); // 重新加载事件
+        // 使用forceSync强制同步而不是loadEvents
+        await forceSync();
         setShowModal(false);
         setShowDeleteConfirm(false);
       } catch (err) {
