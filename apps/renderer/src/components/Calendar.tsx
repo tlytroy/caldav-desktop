@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -21,6 +21,7 @@ interface CalendarProps {
 
 export default function Calendar({ calendarUrl }: CalendarProps) {
   const { events, loadingState, error, loadEvents } = useCalendarEvents(calendarUrl || null);
+  const { eventFilter } = useCalendarStore();
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [eventToDelete, setEventToDelete] = useState<{ id: string; title: string } | null>(null);
@@ -36,6 +37,45 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
     tags: [],
     recurrence: undefined
   });
+
+  // 过滤事件
+  const filteredEvents = useMemo(() => {
+    return events.filter(event => {
+      // 搜索文本过滤
+      if (eventFilter.searchText) {
+        const searchText = eventFilter.searchText.toLowerCase();
+        const matchesTitle = event.title.toLowerCase().includes(searchText);
+        const matchesDescription = event.description?.toLowerCase().includes(searchText);
+        if (!matchesTitle && !matchesDescription) {
+          return false;
+        }
+      }
+
+      // 分类过滤
+      if (eventFilter.categoryId) {
+        if (!event.category || event.category.id !== eventFilter.categoryId) {
+          return false;
+        }
+      }
+
+      // 标签过滤
+      if (eventFilter.tagIds && eventFilter.tagIds.length > 0) {
+        if (!event.tags || event.tags.length === 0) {
+          return false;
+        }
+
+        const hasMatchingTag = event.tags.some(tag =>
+          eventFilter.tagIds?.includes(tag.id)
+        );
+
+        if (!hasMatchingTag) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [events, eventFilter]);
 
   const handleSelect = (info: any) => {
     setFormData({
@@ -169,7 +209,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
           center: 'title',
           right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
         }}
-        events={events}
+        events={filteredEvents}
         weekends={true}
         editable={true}
         selectable={true}
@@ -178,7 +218,39 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
         select={handleSelect}
         eventClick={handleEventClick}
         eventContent={(arg) => {
-          return <div className="touch-pan-x touch-pan-y">{arg.event.title}</div>;
+          const calendarEvent = filteredEvents.find(e => e.id === arg.event.id);
+          return (
+            <div className="touch-pan-x touch-pan-y w-full">
+              <div className="flex items-center">
+                {calendarEvent?.category && (
+                  <div
+                    className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
+                    style={{ backgroundColor: calendarEvent.category.color }}
+                    title={calendarEvent.category.name}
+                  />
+                )}
+                <span className="truncate">{arg.event.title}</span>
+                {calendarEvent?.tags && calendarEvent.tags.length > 0 && (
+                  <div className="ml-1 flex">
+                    {calendarEvent.tags.slice(0, 2).map(tag => (
+                      <div
+                        key={tag.id}
+                        className="w-2 h-2 rounded-full ml-1 flex-shrink-0"
+                        style={{ backgroundColor: tag.color }}
+                        title={tag.name}
+                      />
+                    ))}
+                    {calendarEvent.tags.length > 2 && (
+                      <span className="text-xs ml-1">+{calendarEvent.tags.length - 2}</span>
+                    )}
+                  </div>
+                )}
+                {calendarEvent?.recurrence && (
+                  <span className="ml-1 text-xs">↻</span>
+                )}
+              </div>
+            </div>
+          );
         }}
         height="auto"
         contentHeight="auto"
