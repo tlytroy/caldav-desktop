@@ -1,0 +1,45 @@
+$ vite
+
+  VITE v5.4.21  ready in 206 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+8:18:51 PM [vite] page reload tailwind.config.js
+8:19:28 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:20:22 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:20:31 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:20:40 PM [vite] hmr update /src/components/Calendar.tsx, /src/index.css
+8:21:02 PM [vite] hmr update /src/components/ui/Modal.tsx, /src/index.css
+8:21:12 PM [vite] hmr update /src/components/ui/Modal.tsx, /src/index.css
+8:21:21 PM [vite] hmr update /src/components/ui/Modal.tsx, /src/index.css
+8:21:30 PM [vite] hmr update /src/components/ui/Modal.tsx, /src/index.css
+8:21:46 PM [vite] hmr update /src/components/ui/LoadingSpinner.tsx, /src/index.css
+8:21:56 PM [vite] hmr update /src/components/ui/ErrorBoundary.tsx, /src/index.css
+8:22:06 PM [vite] hmr update /src/components/ui/ErrorBoundary.tsx, /src/index.css
+8:22:28 PM [vite] hmr update /src/components/ui/CategorySelector.tsx, /src/index.css
+8:22:39 PM [vite] hmr update /src/components/ui/CategorySelector.tsx, /src/index.css
+8:22:51 PM [vite] hmr update /src/components/ui/CategorySelector.tsx, /src/index.css
+8:23:07 PM [vite] hmr update /src/components/ui/TagSelector.tsx, /src/index.css
+8:23:18 PM [vite] hmr update /src/components/ui/TagSelector.tsx, /src/index.css
+8:23:35 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:23:44 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:23:53 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:24:03 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:24:12 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:24:22 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:24:33 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:24:44 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:24:55 PM [vite] hmr update /src/components/ui/RecurrenceEditor.tsx, /src/index.css
+8:25:06 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:25:18 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:25:32 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:25:42 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:25:51 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:26:02 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:26:12 PM [vite] hmr update /src/App.tsx, /src/index.css
+8:26:27 PM [vite] hmr update /src/components/Calendar.tsx, /src/index.css
+8:26:39 PM [vite] hmr update /src/components/Calendar.tsx, /src/index.css
+8:26:51 PM [vite] hmr update /src/components/Calendar.tsx, /src/index.css
+8:27:03 PM [vite] hmr update /src/components/Calendar.tsx, /src/index.css
+8:27:15 PM [vite] hmr update /src/components/Calendar.tsx, /src/index.css
+8:27:27 PM [vite] hmr update /src/components/Calendar.tsx, /src/index.css
