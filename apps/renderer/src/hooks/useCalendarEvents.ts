@@ -35,7 +35,8 @@ export function useCalendarEvents(calendarUrl: string | null) {
     setSyncStatus,
     setSyncError,
     setCachedEvents,
-    clearCache
+    clearCache,
+    removeEventFromCache
   } = useSyncStore();
 
   // 检查缓存是否有效
@@ -162,8 +163,9 @@ export function useCalendarEvents(calendarUrl: string | null) {
 
       try {
         await deleteCalendarEvent(eventId, calendarUrl);
-        // 清除缓存并重新同步
-        clearCache(calendarUrl);
+        // 从缓存中移除事件而不是清除整个缓存
+        removeEventFromCache(calendarUrl, eventId);
+        // 然后执行同步以确保数据一致性
         await performSync();
       } catch (err) {
         const errorMessage =
@@ -171,12 +173,29 @@ export function useCalendarEvents(calendarUrl: string | null) {
         throw new Error(errorMessage);
       }
     },
-    [calendarUrl, clearCache, performSync]
+    [calendarUrl, removeEventFromCache, performSync]
   );
 
   // 强制同步
   const forceSync = useCallback(async () => {
     await performSync();
+  }, [performSync]);
+
+  // 初始化同步（带重试机制）
+  const initSync = useCallback(async (retryCount = 3) => {
+    for (let i = 0; i < retryCount; i++) {
+      try {
+        await performSync();
+        return true;
+      } catch (err) {
+        console.warn(`Initialization sync attempt ${i + 1} failed:`, err);
+        if (i < retryCount - 1) {
+          // 等待一段时间后重试
+          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        }
+      }
+    }
+    return false;
   }, [performSync]);
 
   // 初始化加载
@@ -213,9 +232,11 @@ export function useCalendarEvents(calendarUrl: string | null) {
     updateEvent,
     deleteEvent,
     forceSync,
+    initSync,
     isSyncing,
     syncStatus,
     syncError,
     lastSyncTime,
+    setLoadingState,
   };
 }

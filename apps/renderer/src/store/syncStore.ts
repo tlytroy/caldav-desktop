@@ -21,6 +21,7 @@ interface SyncState {
   setSyncError: (error: string | null) => void;
   setCachedEvents: (calendarUrl: string, events: any[]) => void;
   clearCache: (calendarUrl?: string) => void;
+  removeEventFromCache: (calendarUrl: string, eventId: string) => void;
   forceSync: () => void;
 }
 
@@ -61,6 +62,24 @@ export const useSyncStore = create<SyncState>()(
         } else {
           set({ cachedEvents: {}, cacheTimestamps: {} });
         }
+      },
+
+      // 部分更新缓存（例如删除单个事件）
+      removeEventFromCache: (calendarUrl: string, eventId: string) => {
+        set((state) => {
+          if (!state.cachedEvents[calendarUrl]) return state;
+
+          const updatedEvents = state.cachedEvents[calendarUrl].filter(
+            (event: any) => event.uid !== eventId
+          );
+
+          return {
+            cachedEvents: {
+              ...state.cachedEvents,
+              [calendarUrl]: updatedEvents
+            }
+          };
+        });
       },
       forceSync: () => {
         // 触发强制同步的标志

@@ -1,11 +1,10 @@
-import React from 'react';
 import { Sun, Moon, Monitor } from 'lucide-react';
 import { useThemeStore } from '../../store/themeStore';
 
 export function EnhancedThemeToggle() {
-  const { theme, borderRadius, setTheme, setBorderRadius } = useThemeStore();
+  const { isDarkMode, borderRadius, setTheme, setBorderRadius } = useThemeStore();
 
-  const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
+  const handleThemeChange = (newTheme: boolean) => {
     setTheme(newTheme);
   };
 
@@ -16,12 +15,10 @@ export function EnhancedThemeToggle() {
   return (
     <div className="relative group">
       <button className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-        {theme === 'dark' ? (
+        {isDarkMode ? (
           <Moon className="h-5 w-5" />
-        ) : theme === 'light' ? (
-          <Sun className="h-5 w-5" />
         ) : (
-          <Monitor className="h-5 w-5" />
+          <Sun className="h-5 w-5" />
         )}
       </button>
 
@@ -39,9 +36,9 @@ export function EnhancedThemeToggle() {
               </label>
               <div className="grid grid-cols-3 gap-2">
                 <button
-                  onClick={() => handleThemeChange('light')}
+                  onClick={() => handleThemeChange(false)}
                   className={`px-3 py-2 text-sm rounded-md transition-colors ${
-                    theme === 'light'
+                    !isDarkMode
                       ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-200'
                       : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                   }`}
@@ -50,9 +47,9 @@ export function EnhancedThemeToggle() {
                   浅色
                 </button>
                 <button
-                  onClick={() => handleThemeChange('dark')}
+                  onClick={() => handleThemeChange(true)}
                   className={`px-3 py-2 text-sm rounded-md transition-colors ${
-                    theme === 'dark'
+                    isDarkMode
                       ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-200'
                       : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                   }`}
@@ -61,9 +58,9 @@ export function EnhancedThemeToggle() {
                   深色
                 </button>
                 <button
-                  onClick={() => handleThemeChange('system')}
+                  onClick={() => setTheme(window.matchMedia('(prefers-color-scheme: dark)').matches)}
                   className={`px-3 py-2 text-sm rounded-md transition-colors ${
-                    theme === 'system'
+                    isDarkMode === window.matchMedia('(prefers-color-scheme: dark)').matches
                       ? 'bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-200'
                       : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
                   }`}

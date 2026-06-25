@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-import { Download, Calendar, FileText } from 'lucide-react';
-import { useCalendarEvents } from '../../hooks/useCalendarEvents';
+import { useState } from 'react';
+import { Download } from 'lucide-react';
 
 interface ExportButtonProps {
   calendarUrl: string | null;
@@ -8,7 +7,7 @@ interface ExportButtonProps {
 
 export function ExportButton({ calendarUrl }: ExportButtonProps) {
   const [isExporting, setIsExporting] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'ics' | 'json'>('ics');
+  const [exportFormat] = useState<'ics' | 'json'>('ics');
 
   const handleExport = async () => {
     if (!calendarUrl) return;

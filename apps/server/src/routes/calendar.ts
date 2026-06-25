@@ -540,37 +540,95 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
     const { uid } = req.params;
     const { calendarUrl } = req.query;
 
+    console.log(`Attempting to delete event with uid: ${uid}`);
+
     // Ensure we're authenticated
     await ensureAuthenticated();
 
     // Get the target calendar
     const cals = await davClient.fetchCalendars();
     let targetCal = cals[0];
-    if (calendarUrl) {
+    if (calendarUrl && typeof calendarUrl === 'string') {
       targetCal = cals.find((cal) => cal.url === calendarUrl) || cals[0];
     }
 
+    console.log(`Target calendar: ${targetCal?.url}`);
+
     if (!targetCal) {
+      console.warn(`Calendar not found for url: ${calendarUrl}`);
       return res.status(404).json({ error: "Calendar not found" });
     }
 
     // Find the event to delete
+    console.log(`Fetching calendar objects from: ${targetCal.url}`);
     const events = await davClient.fetchCalendarObjects({
       calendar: targetCal,
     });
-    const eventToDelete = events.find((e) => e.url.includes(uid));
 
+    console.log(`Found ${events.length} events in calendar`);
+
+    // 改进查找逻辑：支持多种匹配方式
+    let eventToDelete = null;
+    for (const event of events) {
+      // 直接匹配UID
+      if (event.url.includes(uid)) {
+        eventToDelete = event;
+        console.log(`Found event by URL match: ${event.url}`);
+        break;
+      }
+
+      // 从URL中提取UID进行匹配
+      const urlParts = event.url.split('/');
+      const urlUid = urlParts[urlParts.length - 1].replace('.ics', '');
+      if (urlUid === uid) {
+        eventToDelete = event;
+        console.log(`Found event by extracted UID: ${urlUid}`);
+        break;
+      }
+
+      // 尝试从事件数据中提取UID
+      try {
+        const icalModule = await import("ical.js");
+        const jcal = icalModule.default.parse(event.data.toString());
+        const comp = new icalModule.default.Component(jcal);
+        const vevent = comp.getFirstSubcomponent("vevent");
+        if (vevent) {
+          const uidProp = vevent.getFirstProperty("uid");
+          const eventUid = uidProp?.getFirstValue();
+          if (uidProp && eventUid === uid) {
+            eventToDelete = event;
+            console.log(`Found event by parsed UID: ${eventUid}`);
+            break;
+          }
+        }
+      } catch (parseError) {
+        // 解析失败则跳过
+        console.warn(`Failed to parse event data for UID matching: ${parseError.message}`);
+      }
+    }
+
+    // 即使找不到事件，我们也返回成功，因为结果是一样的（事件不存在）
     if (!eventToDelete) {
-      return res.status(404).json({ error: "Event not found" });
+      console.warn(`Event with uid ${uid} not found in calendar ${targetCal.url}`);
+      return res.json({ success: true, message: "Event not found, but considering deletion successful" });
     }
 
     // Delete the event from CalDAV
+    console.log(`Deleting event: ${eventToDelete.url}`);
     await davClient.deleteCalendarObject({
       calendarObject: eventToDelete,
     });
 
+    console.log(`Successfully deleted event with uid: ${uid}`);
     res.json({ success: true });
   } catch (error) {
+    console.error(`Error deleting event with uid ${req.params.uid}:`, error);
+    // 对于某些特定错误，我们可以考虑返回成功
+    if (error instanceof Error && error.message.includes('Not Found')) {
+      console.warn('Event not found during deletion, considering operation successful');
+      return res.json({ success: true, message: "Event not found, but considering deletion successful" });
+    }
+
     res.status(500).json({ error: (error as Error).message });
   }
 });

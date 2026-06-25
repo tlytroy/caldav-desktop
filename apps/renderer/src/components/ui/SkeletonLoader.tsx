@@ -1,4 +1,3 @@
-import React from 'react';
 
 interface SkeletonLoaderProps {
   type?: 'calendar' | 'event-list' | 'event-card';

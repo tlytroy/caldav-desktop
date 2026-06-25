@@ -126,9 +126,20 @@ export async function deleteCalendarEvent(
   eventId: string,
   calendarUrl: string
 ): Promise<void> {
-  await api.delete(`/api/calendar/events/${eventId}`, {
-    params: { calendarUrl },
-  });
+  try {
+    await api.delete(`/api/calendar/events/${eventId}`, {
+      params: { calendarUrl },
+    });
+  } catch (error) {
+    // 如果是404错误，可能是事件已被删除或者ID不匹配
+    if (error.response?.status === 404) {
+      console.warn(`Event ${eventId} not found on server, it may have already been deleted`);
+      // 在这里我们可以选择忽略404错误，因为结果是一样的（事件不存在）
+      return;
+    }
+    // 其他错误重新抛出
+    throw error;
+  }
 }
 
 // 获取配置

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -25,7 +25,9 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
     loadingState,
     error,
     loadEvents,
-    forceSync
+    forceSync,
+    initSync,
+    setLoadingState
   } = useCalendarEvents(calendarUrl || null);
   const { eventFilter } = useCalendarStore();
   const [showModal, setShowModal] = useState(false);
@@ -43,6 +45,26 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
     tags: [],
     recurrence: undefined
   });
+
+  // 首次加载时执行初始化同步
+  useEffect(() => {
+    if (calendarUrl) {
+      // 显示初始加载状态
+      setLoadingState('loading');
+
+      // 执行带重试的初始化同步
+      initSync().then(success => {
+        if (!success) {
+          console.warn('Initial sync failed after retries');
+          // 即使同步失败，也要更新加载状态，以便用户可以看到界面
+          setLoadingState('success'); // 我们仍然显示界面，但可能会有错误消息
+        }
+      }).catch(err => {
+        console.error('Initial sync failed:', err);
+        setLoadingState('success'); // 即使同步失败，也要显示界面
+      });
+    }
+  }, [calendarUrl, initSync, setLoadingState]);
 
   // 过滤事件
   const filteredEvents = useMemo(() => {
@@ -168,9 +190,17 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
         await forceSync();
         setShowModal(false);
         setShowDeleteConfirm(false);
+        setEventToDelete(null);
       } catch (err) {
         console.error('删除事件失败:', err);
-        alert(err instanceof Error ? err.message : '删除事件失败');
+        // 即使出现错误，我们也关闭对话框，因为用户已经确认了删除操作
+        setShowModal(false);
+        setShowDeleteConfirm(false);
+        setEventToDelete(null);
+
+        // 显示错误信息，但不要阻止用户继续使用应用
+        const errorMessage = err instanceof Error ? err.message : '删除事件时出现未知错误';
+        alert(`删除事件时出现问题: ${errorMessage}\n\n请注意，如果事件实际上已被删除，它将在下次同步时从视图中消失。`);
       }
     }
   };
