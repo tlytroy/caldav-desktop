@@ -26,8 +26,9 @@ Built with the help of AI assistance, this project addresses the lack of standal
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 20+ LTS
 - pnpm
+- Linux environment (native or WSL2) for building
 
 ### Installation & Development
 
@@ -61,18 +62,117 @@ Pre-built packages available in `apps/desktop/dist-electron/`:
 
 - Linux: `CalDAV-Desktop-0.1.0-linux.AppImage` (~100MB)
 - Linux: `CalDAV-Desktop-0.1.0-linux.tar.gz` (~95MB)
-- Windows/macOS: See [DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- Windows/macOS: See Deployment section below
 
-## 📚 Documentation
+### Linux (All Distributions)
 
-- **[DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Building and packaging for all platforms
-- **[TESTING.md](docs/TESTING.md)** - Test plan and results (9/9 tests passing)
-- **[CHANGELOG.md](docs/CHANGELOG.md)** - Version history and feature updates
-- **[DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md)** - Development roadmap and plans
-- **[FEATURE_TRACKING.md](docs/FEATURE_TRACKING.md)** - Feature implementation tracking
-- **[TASK_LIST.md](docs/TASK_LIST.md)** - Current development tasks and priorities
-- **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** - Current project status and metrics
-- **[DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md)** - Daily development progress log
+#### Build Steps
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build for Linux
+cd apps/desktop
+pnpm build
+
+# Package as AppImage and tar.gz
+pnpm package:linux
+```
+
+#### Outputs
+
+Generated in `apps/desktop/dist-electron/`:
+- AppImage: Self-contained executable with no dependencies
+- tar.gz: Compressed archive for manual installation
+
+### Windows
+
+```bash
+# Package for Windows
+cd apps/desktop
+pnpm package:win
+```
+
+### macOS
+
+```bash
+# Package for macOS
+cd apps/desktop
+pnpm package:mac
+```
+
+## 🧪 Testing
+
+### Automated API Tests
+
+```bash
+./run-tests.sh
+```
+
+This script runs 9 comprehensive tests covering all backend functionality.
+
+**Test Results: 9/9 PASSING (100%)**
+
+### Manual Frontend Tests
+
+Start the dev servers first:
+
+```bash
+cd apps/server && pnpm dev      # Terminal 1
+cd apps/renderer && pnpm dev    # Terminal 2
+```
+
+Then visit http://localhost:5173/ in your browser.
+
+## Test Coverage
+
+### Backend API Tests (9/9 Passing)
+
+1. List calendars from Radicale server
+2. Fetch events from calendar
+3. Create new event
+4. Update existing event
+5. Delete event
+6. Handle event categories
+7. Process event tags
+8. Manage recurring events
+9. Support all-day events
+
+## 📊 Changelog
+
+### [0.1.0] - 2026-06-22
+
+#### 🎉 Initial Release - Production Ready
+
+##### ✨ Core Features Implemented
+
+- **CalDAV Integration**: Full synchronization with Radicale servers
+- **Event Management**: Complete CRUD operations (create, read, update, delete)
+- **Event Properties**:
+  - Categories for event organization
+  - Multi-tag support for flexible grouping
+  - Recurring events (daily, weekly, monthly, yearly)
+  - All-day event support
+  - RFC 5545 standard compliance
+
+##### 🎨 Design System (New in v0.1.0)
+
+**Morandi Color Schemes**
+
+- Classic Morandi: Soft gray palette for serene interface
+- Earth Brown: Warm brown tones for natural feel
+- Blue-Green: Fresh cool tones for clarity
+- Purple-Gray: Elegant sophisticated palette
+- Custom color picker for personalization
+
+**Unified Rounded Corner Design**
+
+Consistent rounded corners throughout the interface for modern aesthetic.
+
+**Dark Mode**
+
+Full dark mode support with automatic system preference detection.
 
 ## 🏗️ Architecture
 
@@ -97,36 +197,6 @@ Pre-built packages available in `apps/desktop/dist-electron/`:
         └──────────────┘
 ```
 
-## 🧪 Testing
-
-Run the automated test suite:
-
-```bash
-./run-tests.sh
-```
-
-Tests: 9/9 passing (100%)
-
-- Calendar operations (list)
-- Event CRUD (create, read, update, delete)
-- Categories, tags, recurring events, all-day events
-
-## 📊 Project Status
-
-✅ **Production Ready**
-
-- All core functionality implemented
-- Comprehensive testing (9/9 passing)
-- Full RFC 5545 compliance
-- Cross-platform support
-
-### Code Quality
-
-- TypeScript 100% type coverage
-- Consistent formatting
-- Complete error handling
-- Detailed logging
-
 ## 🗂️ Project Structure
 
 ```
@@ -135,15 +205,13 @@ radicale-desktop/
 │   ├── desktop/     # Electron main process
 │   ├── renderer/    # React frontend
 │   └── server/      # Node.js backend
-├── packages/
-│   └── shared/      # Shared types
 ├── docs/            # Documentation
 └── pnpm-workspace.yaml
 ```
 
 ## 🔄 Next Steps
 
-- [ ] Windows/macOS packaging (see [DEPLOYMENT.md](docs/DEPLOYMENT.md))
+- [ ] Windows/macOS packaging improvements
 - [ ] User feedback collection
 - [ ] Performance monitoring
 - [ ] v0.2: Advanced filtering, event search, more themes
@@ -167,5 +235,4 @@ Contributions welcome! See existing code style and structure.
 This project was developed with the help of AI coding assistants, demonstrating how modern AI tools can accelerate software development while maintaining high code quality and best practices.
 
 ---
-
-**Last Updated**: 2026-06-22
+**Last Updated**: 2026-06-25
