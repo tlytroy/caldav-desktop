@@ -48,7 +48,8 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
       aria-modal="true"
       role="dialog"
     >
-      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      {/* 使用flexbox确保在所有屏幕尺寸下都居中 */}
+      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
         {/* Background overlay */}
         <div
           className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75 dark:bg-gray-800 dark:bg-opacity-75"
@@ -56,14 +57,9 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
           onClick={onClose}
         />
 
-        {/* This element is to trick the browser into centering the modal contents. */}
-        <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">
-          &#8203;
-        </span>
-
-        {/* Modal panel */}
+        {/* Modal panel - 使用现代flexbox居中方法 */}
         <div
-          className={`inline-block align-bottom bg-white dark:bg-neutral-700 ${borderRadius} text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:w-full ${sizeClasses[size]} max-h-[90vh] flex flex-col`}
+          className={`inline-block align-bottom bg-white dark:bg-neutral-700 ${borderRadius} text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:w-full ${sizeClasses[size]} max-h-[90vh] flex flex-col w-full ${size === 'xl' ? 'max-w-4xl' : size === 'lg' ? 'max-w-2xl' : size === 'md' ? 'max-w-lg' : 'max-w-md'} mx-auto ${size === 'xl' ? '2xl:max-w-5xl' : ''}`}
           role="dialog"
           aria-modal="true"
           aria-labelledby="modal-headline"
@@ -87,7 +83,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
               </button>
             </div>
           </div>
-          <div className="overflow-y-auto flex-grow px-4 pb-4 sm:px-6 sm:pb-6">
+          <div className="overflow-y-auto flex-grow px-4 pb-4 sm:px-6 sm:pb-6" style={{ maxHeight: 'calc(90vh - 150px)' }}>
             {children}
           </div>
         </div>

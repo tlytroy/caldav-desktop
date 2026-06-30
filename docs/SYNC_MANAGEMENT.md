@@ -10,10 +10,11 @@ CalDAV Desktop implements an intelligent sync management system to optimize perf
 
 The application implements a local caching mechanism to reduce network requests and improve performance:
 
-1. **Local Storage**: Events are cached in browser's localStorage
+1. **Local Storage**: Events are cached in browser's localStorage using Zustand state management
 2. **Cache Expiration**: Cached data expires after 1 hour
 3. **Offline Access**: View cached events even when offline
 4. **Seamless Refresh**: Cache automatically refreshes during sync operations
+5. **Partial Updates**: Individual events can be removed from cache without clearing entire cache
 
 ### Sync Strategies
 
@@ -33,6 +34,10 @@ Trigger immediate sync anytime using the manual sync button in the bottom status
 #### 3. Event-Driven Sync
 
 Automatic sync occurs after any event modification (create, update, delete) to ensure server consistency.
+
+#### 4. Immediate Feedback with Background Sync
+
+When users perform actions (create, update, delete), the UI immediately reflects the change while the actual synchronization happens in the background. This provides a responsive user experience without blocking the interface.
 
 ## User Interface
 

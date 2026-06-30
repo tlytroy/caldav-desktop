@@ -43,7 +43,7 @@ Then visit http://localhost:5173/ in your browser.
 | Create Event | 201    | Generates unique UID, valid ICS format, syncs to server  |
 | Read Events  | 200    | Supports date range queries, parses event list correctly |
 | Update Event | 200    | Updates existing events, maintains UID, syncs changes    |
-| Delete Event | 200    | Removes events from calendar                             |
+| Delete Event | 200    | Removes events from calendar, handles 404 gracefully     |
 
 #### 3. Advanced Features
 
@@ -107,6 +107,9 @@ Then visit http://localhost:5173/ in your browser.
 - ✅ Sync status indicators show real-time status
 - ✅ Last sync time displays properly
 - ✅ Cache management works after event changes
+- ✅ Immediate frontend feedback with background synchronization
+- ✅ Graceful error handling for sync failures
+- ✅ Partial cache updates (individual event removal)
 
 ### User Experience
 

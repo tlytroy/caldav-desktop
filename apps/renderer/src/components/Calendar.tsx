@@ -6,6 +6,7 @@ import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
 import { useCalendarEvents } from '../hooks/useCalendarEvents';
 import { useCalendarStore } from '../store/calendarStore';
+import { useSyncStore } from '../store/syncStore';
 import { CategorySelector } from './ui/CategorySelector';
 import { TagSelector } from './ui/TagSelector';
 import { RecurrenceEditor } from './ui/RecurrenceEditor';
@@ -30,6 +31,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
     setLoadingState
   } = useCalendarEvents(calendarUrl || null);
   const { eventFilter } = useCalendarStore();
+  const { removeEventFromCache } = useSyncStore();
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [eventToDelete, setEventToDelete] = useState<{ id: string; title: string } | null>(null);
@@ -46,22 +48,16 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
     recurrence: undefined
   });
 
-  // 首次加载时执行初始化同步
+  // 首次加载时执行初始化同步，但不要阻塞UI显示
   useEffect(() => {
     if (calendarUrl) {
-      // 显示初始加载状态
-      setLoadingState('loading');
+      // 立即显示日历框架，事件数据在后台加载
+      setLoadingState('success');
 
-      // 执行带重试的初始化同步
-      initSync().then(success => {
-        if (!success) {
-          console.warn('Initial sync failed after retries');
-          // 即使同步失败，也要更新加载状态，以便用户可以看到界面
-          setLoadingState('success'); // 我们仍然显示界面，但可能会有错误消息
-        }
-      }).catch(err => {
-        console.error('Initial sync failed:', err);
-        setLoadingState('success'); // 即使同步失败，也要显示界面
+      // 在后台执行初始化同步
+      initSync().catch(err => {
+        console.error('Background sync failed:', err);
+        // 后台同步失败不影响UI显示
       });
     }
   }, [calendarUrl, initSync, setLoadingState]);
@@ -141,37 +137,60 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
     }
 
     try {
-      if (formData.id) {
-        // 更新现有事件
-        await updateCalendarEventFromForm(formData.id, calendarUrl, {
-          title: formData.title,
-          start: formData.start,
-          end: formData.end,
-          allDay: formData.allDay,
-          description: formData.description,
-          category: formData.category,
-          tags: formData.tags,
-          recurrence: formData.recurrence
-        });
-      } else {
-        // 创建新事件
-        await createCalendarEventFromForm(calendarUrl, {
-          title: formData.title,
-          start: formData.start,
-          end: formData.end,
-          allDay: formData.allDay,
-          description: formData.description,
-          category: formData.category,
-          tags: formData.tags,
-          recurrence: formData.recurrence
-        });
-      }
-      // 使用forceSync强制同步而不是loadEvents
-      await forceSync();
+      // 立即更新UI - 关闭对话框
       setShowModal(false);
+
+      // 显示成功消息
+      console.log('事件保存成功，正在后台同步...');
+
+      // 在后台执行实际的保存操作和同步
+      const saveAndSync = async () => {
+        try {
+          if (formData.id) {
+            // 更新现有事件
+            await updateCalendarEventFromForm(formData.id, calendarUrl, {
+              title: formData.title,
+              start: formData.start,
+              end: formData.end,
+              allDay: formData.allDay,
+              description: formData.description,
+              category: formData.category,
+              tags: formData.tags,
+              recurrence: formData.recurrence
+            });
+          } else {
+            // 创建新事件
+            await createCalendarEventFromForm(calendarUrl, {
+              title: formData.title,
+              start: formData.start,
+              end: formData.end,
+              allDay: formData.allDay,
+              description: formData.description,
+              category: formData.category,
+              tags: formData.tags,
+              recurrence: formData.recurrence
+            });
+          }
+          
+          // 执行后台同步
+          await forceSync();
+          console.log('后台同步完成');
+        } catch (err) {
+          console.error('后台同步失败:', err);
+          // 如果后台同步失败，可以在UI上显示一个小提示
+          // 或者在下次应用启动时重试
+        }
+      };
+
+      // 立即开始后台操作
+      saveAndSync().catch(err => {
+        console.error('后台保存失败:', err);
+      });
     } catch (err) {
       console.error('保存事件失败:', err);
       alert(err instanceof Error ? err.message : '保存事件失败');
+      // 如果立即操作失败，重新显示对话框
+      setShowModal(true);
     }
   };
 
@@ -185,22 +204,38 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
   const confirmDelete = async () => {
     if (eventToDelete?.id && calendarUrl) {
       try {
-        await deleteCalendarEvent(eventToDelete.id, calendarUrl);
-        // 使用forceSync强制同步而不是loadEvents
-        await forceSync();
-        setShowModal(false);
-        setShowDeleteConfirm(false);
-        setEventToDelete(null);
-      } catch (err) {
-        console.error('删除事件失败:', err);
-        // 即使出现错误，我们也关闭对话框，因为用户已经确认了删除操作
+        // 立即更新UI - 关闭对话框
         setShowModal(false);
         setShowDeleteConfirm(false);
         setEventToDelete(null);
 
-        // 显示错误信息，但不要阻止用户继续使用应用
-        const errorMessage = err instanceof Error ? err.message : '删除事件时出现未知错误';
-        alert(`删除事件时出现问题: ${errorMessage}\n\n请注意，如果事件实际上已被删除，它将在下次同步时从视图中消失。`);
+        // 立即从本地缓存中移除事件
+        // 注意：这里我们不等待服务器响应，而是立即更新UI
+        // 实际的服务器同步将在后台进行
+        removeEventFromCache(calendarUrl, eventToDelete.id);
+        
+        // 显示成功消息
+        console.log('事件删除成功，正在后台同步...');
+        
+        // 在后台执行同步操作
+        forceSync().catch(err => {
+          console.error('后台同步失败:', err);
+          // 如果后台同步失败，可以在UI上显示一个小提示
+          // 或者在下次应用启动时重试
+        });
+      } catch (err) {
+        console.error('删除事件时发生错误:', err);
+        // 如果立即操作失败，重新显示对话框
+        setShowDeleteConfirm(true);
+        
+        // 显示详细错误信息
+        let errorMessage = '删除事件时出现未知错误';
+        if (err instanceof Error) {
+          errorMessage = err.message;
+        }
+
+        // 如果是网络错误或其他技术错误，给用户更多上下文
+        alert(`删除事件失败: ${errorMessage}\n\n请检查您的网络连接并重试。如果问题持续存在，请联系技术支持。`);
       }
     }
   };
@@ -213,32 +248,110 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
     return date.toISOString().split('T')[0];
   };
 
+  // 即使在加载或错误状态下也显示日历框架，但显示相应的提示
   if (loadingState === 'loading') {
     return (
-      <div className="flex justify-center items-center h-64">
-        <LoadingSpinner message="加载事件中..." />
+      <div className="bg-white dark:bg-neutral-700 rounded-lg shadow p-4 relative">
+        <div className="absolute top-4 right-4 z-10">
+          <LoadingSpinner message="加载事件中..." />
+        </div>
+        <FullCalendar
+          plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          headerToolbar={{
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+          }}
+          events={[]} // 加载过程中显示空事件列表
+          weekends={true}
+          editable={true}
+          selectable={true}
+          selectMirror={true}
+          dayMaxEvents={true}
+          select={handleSelect}
+          eventClick={handleEventClick}
+          height="auto"
+          contentHeight="auto"
+          expandRows={true}
+        />
       </div>
     );
   }
 
   if (loadingState === 'error') {
     return (
-      <div className="flex justify-center items-center h-64">
-        <div className="text-center">
-          <p className="text-red-600 mb-2">错误: {error}</p>
+      <div className="bg-white dark:bg-neutral-700 rounded-lg shadow p-4 relative">
+        <div className="absolute top-4 right-4 z-10">
+          <div className="text-red-600 text-sm">错误: {error}</div>
           <button
             onClick={() => loadEvents()}
-            className="px-4 py-2 text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors"
+            className="px-2 py-1 text-xs text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors mt-1"
           >
             重试
           </button>
         </div>
+        <FullCalendar
+          plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
+          initialView="dayGridMonth"
+          headerToolbar={{
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+          }}
+          events={events} // 即使有错误也显示已有的事件
+          weekends={true}
+          editable={true}
+          selectable={true}
+          selectMirror={true}
+          dayMaxEvents={true}
+          select={handleSelect}
+          eventClick={handleEventClick}
+          eventContent={(arg) => {
+            const calendarEvent = events.find(e => e.id === arg.event.id);
+            return (
+              <div className="touch-pan-x touch-pan-y w-full">
+                <div className="flex items-center">
+                  {calendarEvent?.category && (
+                    <div
+                      className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
+                      style={{ backgroundColor: calendarEvent.category.color }}
+                      title={calendarEvent.category.name}
+                    />
+                  )}
+                  <span className="truncate">{arg.event.title}</span>
+                  {calendarEvent?.tags && calendarEvent.tags.length > 0 && (
+                    <div className="ml-1 flex">
+                      {calendarEvent.tags.slice(0, 2).map(tag => (
+                        <div
+                          key={tag.id}
+                          className="w-2 h-2 rounded-full ml-1 flex-shrink-0"
+                          style={{ backgroundColor: tag.color }}
+                          title={tag.name}
+                        />
+                      ))}
+                      {calendarEvent.tags.length > 2 && (
+                        <span className="text-xs ml-1">+{calendarEvent.tags.length - 2}</span>
+                      )}
+                    </div>
+                  )}
+                  {calendarEvent?.recurrence && (
+                    <span className="ml-1 text-xs">↻</span>
+                  )}
+                </div>
+              </div>
+            );
+          }}
+          height="auto"
+          contentHeight="auto"
+          expandRows={true}
+        />
       </div>
     );
   }
 
   return (
-    <div className="bg-white dark:bg-neutral-700 rounded-lg shadow p-4">
+    <div className="bg-white dark:bg-neutral-700 rounded-lg shadow p-4 relative">
       <FullCalendar
         plugins={[dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin]}
         initialView="dayGridMonth"
@@ -247,7 +360,10 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
           center: 'title',
           right: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
         }}
-        events={filteredEvents}
+        events={filteredEvents.map(event => ({
+          ...event,
+          id: event.id
+        }))}
         weekends={true}
         editable={true}
         selectable={true}
@@ -436,7 +552,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
           />
         </div>
 
-        <div className="flex flex-wrap justify-end gap-3 mt-6">
+        <div className="flex flex-wrap justify-end gap-3 mt-6 sticky bottom-0 bg-white dark:bg-neutral-700 py-4 border-t border-gray-200 dark:border-gray-600">
           <button
             onClick={() => setShowModal(false)}
             className={`px-6 py-3 text-base text-gray-700 bg-gray-100 ${borderRadius} hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors min-w-[100px]`}

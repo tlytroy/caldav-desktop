@@ -90,46 +90,47 @@ export default function App() {
           </div>
         </div>
 
-        {!calendars.length && (
-          <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-blue-600">正在加载日历...</p>
-          </div>
-        )}
-
-        {calendars.length > 0 && (
-          <div className="mb-8">
-            <label htmlFor="calendar-select" className="block text-sm font-medium text-gray-700 mb-2">
-              选择日历
-            </label>
-            <select
-              id="calendar-select"
-              value={selectedCalendarUrl || ''}
-              onChange={(e) => setSelectedCalendarUrl(e.target.value)}
-              className="block w-full max-w-xs rounded-lg border-gray-300 dark:border-gray-600 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:text-white"
-            >
-              {calendars.map((cal: any) => (
+        {/* 日历选择器 - 始终显示 */}
+        <div className="mb-8">
+          <label htmlFor="calendar-select" className="block text-sm font-medium text-gray-700 mb-2">
+            选择日历
+          </label>
+          <select
+            id="calendar-select"
+            value={selectedCalendarUrl || ''}
+            onChange={(e) => setSelectedCalendarUrl(e.target.value)}
+            className="block w-full max-w-xs rounded-lg border-gray-300 dark:border-gray-600 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm dark:bg-gray-700 dark:text-white"
+            disabled={!calendars.length}
+          >
+            {!calendars.length ? (
+              <option>正在加载日历...</option>
+            ) : (
+              calendars.map((cal: any) => (
                 <option key={cal.url} value={cal.url}>
                   {cal.displayName || '默认日历'}
                 </option>
-              ))}
-            </select>
-          </div>
-        )}
+              ))
+            )}
+          </select>
+        </div>
 
-        {/* 搜索和过滤栏 */}
-        {calendars.length > 0 && selectedCalendarUrl && (
+        {/* 搜索和过滤栏 - 当有选中的日历时显示 */}
+        {selectedCalendarUrl && (
           <FilterBar onFilterChange={setEventFilter} />
         )}
 
         {/* 日历视图 */}
-        <div className="mt-8">
-          {calendars.length > 0 && selectedCalendarUrl && (
+        <div className="mt-8 max-w-7xl mx-auto">
+          {selectedCalendarUrl ? (
             <Calendar calendarUrl={selectedCalendarUrl} />
-          )}
-          {calendars.length === 0 && (
+          ) : calendars.length === 0 ? (
             <div className="bg-white rounded-xl shadow p-8 text-center">
-              <p className="text-gray-500 mb-4">未找到日历</p>
-              <p className="text-gray-400 text-sm">请检查CalDAV配置是否正确</p>
+              <p className="text-gray-500 mb-4">正在加载日历...</p>
+              <p className="text-gray-400 text-sm">请稍候</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl shadow p-8 text-center">
+              <p className="text-gray-500 mb-4">请选择一个日历</p>
             </div>
           )}
         </div>

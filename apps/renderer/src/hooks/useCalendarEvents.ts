@@ -49,15 +49,21 @@ export function useCalendarEvents(calendarUrl: string | null) {
   // 从缓存或服务器加载事件
   const loadEvents = useCallback(
     async (startDate?: Date, endDate?: Date, forceRefresh = false) => {
-      if (!calendarUrl) return;
+      console.log('loadEvents called with calendarUrl:', calendarUrl);
+      if (!calendarUrl) {
+        console.log('No calendarUrl, returning early');
+        return;
+      }
 
       // 如果有有效的缓存且不强制刷新，直接使用缓存
       if (!forceRefresh && isCacheValid(calendarUrl)) {
+        console.log('Using cached events');
         setEvents(cachedEvents[calendarUrl]);
         setLoadingState("success");
         return;
       }
 
+      console.log('Setting loading state to loading');
       setLoadingState("loading");
       setError(null);
 
@@ -70,17 +76,21 @@ export function useCalendarEvents(calendarUrl: string | null) {
             start.getTime() + DEFAULT_DATE_RANGE_DAYS * 24 * 60 * 60 * 1000
           );
 
+        console.log('Fetching events from API');
         const fetchedEvents = await fetchCalendarEvents(
           calendarUrl,
           start,
           end
         );
+        console.log('Fetched events:', fetchedEvents.length);
 
         // 更新缓存
         setCachedEvents(calendarUrl, fetchedEvents);
         setEvents(fetchedEvents);
+        console.log('Setting loading state to success');
         setLoadingState("success");
       } catch (err) {
+        console.error('Error fetching events:', err);
         const errorMessage =
           err instanceof Error ? err.message : "获取事件失败";
         setError(errorMessage);
@@ -88,6 +98,7 @@ export function useCalendarEvents(calendarUrl: string | null) {
 
         // 如果有缓存，即使获取失败也显示缓存数据
         if (cachedEvents[calendarUrl]) {
+          console.log('Using cached events due to error');
           setEvents(cachedEvents[calendarUrl]);
           setLoadingState("success");
         }
@@ -201,9 +212,14 @@ export function useCalendarEvents(calendarUrl: string | null) {
   // 初始化加载
   useEffect(() => {
     if (calendarUrl) {
-      loadEvents();
+      // 使用带重试机制的初始化同步
+      initSync().catch(err => {
+        console.error('Initial sync failed:', err);
+        // 即使初始化同步失败，也要加载缓存中的数据（如果有）
+        loadEvents();
+      });
     }
-  }, [calendarUrl, loadEvents]);
+  }, [calendarUrl, initSync, loadEvents]);
 
   // 设置定时同步
   useEffect(() => {

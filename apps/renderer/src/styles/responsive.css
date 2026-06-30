@@ -1,0 +1,42 @@
+/* 响应式设计增强 */
+
+/* 超宽屏幕适配 */
+@media (min-width: 1536px) {
+  .max-w-4xl {
+    max-width: 80rem; /* 1280px */
+  }
+
+  .max-w-5xl {
+    max-width: 90rem; /* 1440px */
+  }
+}
+
+/* 确保模态框在超宽屏幕上不会过度拉伸 */
+.modal-container {
+  max-width: 95vw;
+  margin: 0 auto;
+}
+
+/* 在超宽屏幕上保持内容的可读性 */
+.max-readable-width {
+  max-width: 75ch; /* 大约80个字符宽度 */
+}
+
+/* 确保按钮在所有屏幕尺寸下都可见 */
+.sticky-buttons {
+  position: sticky;
+  bottom: 0;
+  background: inherit;
+  z-index: 10;
+}
+
+/* 处理超宽屏幕上的表格和日历 */
+.fc {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* 确保在大屏幕上模态框内容不会太宽 */
+.modal-content-narrow {
+  max-width: 65ch;
+}

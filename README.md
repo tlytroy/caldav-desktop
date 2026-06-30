@@ -14,7 +14,10 @@ Built with the help of AI assistance, this project addresses the lack of standal
   - Local caching for improved performance
   - Manual sync button for immediate updates
   - Sync status visualization in bottom status bar
+  - Immediate frontend feedback with background synchronization
 - **Event Management**: Create, edit, delete events with full CRUD operations
+  - Enhanced delete functionality with robust error handling
+  - Graceful handling of network issues and server errors
 - **Advanced Features**:
   - Event categories for organization
   - Multi-tag support for flexible grouping
@@ -235,13 +238,24 @@ radicale-desktop/
 
 Contributions welcome! See existing code style and structure.
 
+## 📚 Documentation
+
+- README.md - Project overview and quick start
+- docs/TESTING.md - Comprehensive test plan and results
+- docs/DEPLOYMENT.md - Build and packaging guide for all platforms
+- docs/CHANGELOG.md - Version history and feature updates
+- docs/UPDATE_LOG.md - Continuous update log with detailed changes
+- docs/SYNC_MANAGEMENT.md - Sync management and caching guide
+
 ## 🤖 AI-Assisted Development
 
 This project was developed with the help of AI coding assistants, demonstrating how modern AI tools can accelerate software development while maintaining high code quality and best practices.
 
 ---
-**Last Updated**: 2026-06-25
+**Last Updated**: 2026-06-30
 
 ## 📢 Latest Updates
+
+**June 30, 2026**: Enhanced delete functionality and sync management with improved error handling and user feedback. Documentation consolidated and redundant files removed.
 
 **June 25, 2026**: Repository cleaned and optimized - large build artifacts removed from Git history for better performance and reduced clone times. All documentation updated to reflect latest changes.

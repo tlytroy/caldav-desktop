@@ -24,18 +24,21 @@ All notable changes to CalDAV Desktop are documented here.
 - Cache expiration management (1-hour TTL)
 - Offline access to cached events
 - Seamless cache refresh on sync
+- Partial cache updates (e.g., remove single event without clearing entire cache)
 
 **Flexible Sync Management**
 - Configurable sync intervals: 5/10/30 minutes or manual
 - Manual sync button for immediate updates
 - Automatic sync after event modifications
 - Sync status visualization in bottom status bar
+- Immediate frontend feedback with background synchronization
 
 **User Experience Enhancements**
 - Real-time sync status indicators
 - Last sync time display
 - Error messaging for sync failures
 - Non-blocking sync operations
+- Graceful error handling with user-friendly messages
 
 #### 🎨 Design System (New in v0.1.0)
 
@@ -207,15 +210,21 @@ cd apps/renderer && pnpm dev    # Terminal 2
 
 ---
 
-## 📝 Recent Updates (June 25, 2026)
+## 📝 Recent Updates
 
-### 🧹 Repository Maintenance
+### June 30, 2026 - Documentation Consolidation
+
+- **文档整理**: 合并并删除了冗余的文档文件
+- **统一更新日志**: 创建了持续更新的日志文件(docs/UPDATE_LOG.md)
+- **增强功能**: 改进了删除功能和同步管理机制
+
+### June 25, 2026 - Repository Maintenance
 
 - **Git History Optimization**: Large build artifacts (>50MB) removed from Git history
 - **Repository Cleanup**: Improved clone performance and reduced storage requirements
 - **Documentation Updates**: All guides synchronized with latest code changes
 
-### 🛠️ Build Artifact Management
+### June 25, 2026 - Build Artifact Management
 
 - **Large File Removal**: Removed oversized binaries from Git history:
   - Linux AppImage (~100MB)

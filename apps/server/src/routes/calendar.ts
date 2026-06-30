@@ -570,8 +570,11 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
     // 改进查找逻辑：支持多种匹配方式
     let eventToDelete = null;
     for (const event of events) {
-      // 直接匹配UID
-      if (event.url.includes(uid)) {
+      // 直接匹配UID（多种变体）
+      if (event.url.includes(uid) ||
+          event.url.includes(`${uid}.ics`) ||
+          event.url.endsWith(`/${uid}`) ||
+          event.url.endsWith(`/${uid}.ics`)) {
         eventToDelete = event;
         console.log(`Found event by URL match: ${event.url}`);
         break;
@@ -580,7 +583,8 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
       // 从URL中提取UID进行匹配
       const urlParts = event.url.split('/');
       const urlUid = urlParts[urlParts.length - 1].replace('.ics', '');
-      if (urlUid === uid) {
+      const normalizedUid = uid.replace('.ics', ''); // 移除可能的.ics后缀
+      if (urlUid === normalizedUid || urlUid === uid) {
         eventToDelete = event;
         console.log(`Found event by extracted UID: ${urlUid}`);
         break;
@@ -595,9 +599,16 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
         if (vevent) {
           const uidProp = vevent.getFirstProperty("uid");
           const eventUid = uidProp?.getFirstValue();
-          if (uidProp && eventUid === uid) {
+          if (uidProp && (eventUid === uid || eventUid === normalizedUid)) {
             eventToDelete = event;
             console.log(`Found event by parsed UID: ${eventUid}`);
+            break;
+          }
+
+          // 特殊处理：如果事件UID包含完整的URL路径，尝试部分匹配
+          if (eventUid && eventUid.includes(uid)) {
+            eventToDelete = event;
+            console.log(`Found event by partial UID match: ${eventUid}`);
             break;
           }
         }
@@ -610,7 +621,12 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
     // 即使找不到事件，我们也返回成功，因为结果是一样的（事件不存在）
     if (!eventToDelete) {
       console.warn(`Event with uid ${uid} not found in calendar ${targetCal.url}`);
-      return res.json({ success: true, message: "Event not found, but considering deletion successful" });
+      // 返回更详细的响应，说明可能的原因
+      return res.json({
+        success: true,
+        message: "Event not found, but considering deletion successful",
+        details: `Could not find event with UID '${uid}' in calendar. It may have already been deleted or the UID format may differ.`
+      });
     }
 
     // Delete the event from CalDAV
@@ -620,16 +636,23 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
     });
 
     console.log(`Successfully deleted event with uid: ${uid}`);
-    res.json({ success: true });
+    res.json({ success: true, message: "Event successfully deleted" });
   } catch (error) {
     console.error(`Error deleting event with uid ${req.params.uid}:`, error);
     // 对于某些特定错误，我们可以考虑返回成功
-    if (error instanceof Error && error.message.includes('Not Found')) {
+    if (error instanceof Error && (error.message.includes('Not Found') || error.message.includes('404'))) {
       console.warn('Event not found during deletion, considering operation successful');
-      return res.json({ success: true, message: "Event not found, but considering deletion successful" });
+      return res.json({
+        success: true,
+        message: "Event not found, but considering deletion successful",
+        details: "The event appears to be already deleted or not found."
+      });
     }
 
-    res.status(500).json({ error: (error as Error).message });
+    res.status(500).json({
+      error: (error as Error).message,
+      details: "An unexpected error occurred while deleting the event. Please try again."
+    });
   }
 });
 
