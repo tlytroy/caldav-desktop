@@ -48,183 +48,216 @@ calendarRouter.get("/events", async (req, res) => {
       calendar: targetCal,
     });
 
-    // 解析ICS数据以提取事件信息
+    // 解析ICS数据以提取事件信息，并按日期范围过滤
     const icalModule = await import("ical.js");
-    const parsedEvents = events.map((event) => {
-      try {
-        // 解析ICS内容
-        const jcal = icalModule.default.parse(event.data.toString());
-        const comp = new icalModule.default.Component(jcal);
-        const vevent = comp.getFirstSubcomponent("vevent");
+    const startFilter = new Date(start as string);
+    const endFilter = new Date(end as string);
 
-        if (vevent) {
+    const parsedEvents = events
+      .filter((event) => {
+        try {
+          const jcal = icalModule.default.parse(event.data.toString());
+          const comp = new icalModule.default.Component(jcal);
+          const vevent = comp.getFirstSubcomponent("vevent");
+          if (!vevent) return false;
+
           const startProp = vevent.getFirstProperty("dtstart");
-          const endProp = vevent.getFirstProperty("dtend");
-          const summaryProp = vevent.getFirstProperty("summary");
-          const uidProp = vevent.getFirstProperty("uid");
-          const categoriesProp = vevent.getFirstProperty("categories");
-          const tagsProp = vevent.getFirstProperty("x-tags");
-          const rruleProp = vevent.getFirstProperty("rrule");
-          const descriptionProp = vevent.getFirstProperty("description");
+          if (!startProp) return false;
 
-          let startDate, endDate;
+          const eventStart = startProp.getFirstValue();
+          let eventStartDate: Date;
 
-          try {
-            startDate = startProp ? startProp.getFirstValue() : new Date();
-            endDate = endProp
-              ? endProp.getFirstValue()
-              : new Date(Date.now() + 3600000);
-
-            // 更安全的日期处理
-            if (!(startDate instanceof Date)) {
-              if (typeof startDate === "string") {
-                startDate = new Date(startDate);
-              } else if (startDate && typeof startDate === "object") {
-                // 处理ical.js返回的日期对象
-                if (
-                  startDate.toJSDate &&
-                  typeof startDate.toJSDate === "function"
-                ) {
-                  startDate = startDate.toJSDate();
-                } else if (startDate._time) {
-                  startDate = new Date(startDate._time);
-                } else {
-                  // 尝试获取日期字符串表示
-                  const dateStr = startDate.toString
-                    ? startDate.toString()
-                    : null;
-                  startDate = dateStr ? new Date(dateStr) : new Date();
-                }
-              } else {
-                startDate = new Date();
-              }
-            }
-
-            if (!(endDate instanceof Date)) {
-              if (typeof endDate === "string") {
-                endDate = new Date(endDate);
-              } else if (endDate && typeof endDate === "object") {
-                // 处理ical.js返回的日期对象
-                if (
-                  endDate.toJSDate &&
-                  typeof endDate.toJSDate === "function"
-                ) {
-                  endDate = endDate.toJSDate();
-                } else if (endDate._time) {
-                  endDate = new Date(endDate._time);
-                } else {
-                  // 尝试获取日期字符串表示
-                  const dateStr = endDate.toString ? endDate.toString() : null;
-                  endDate = dateStr
-                    ? new Date(dateStr)
-                    : new Date(Date.now() + 3600000);
-                }
-              } else {
-                endDate = new Date(Date.now() + 3600000);
-              }
-            }
-          } catch (dateError) {
-            console.warn("Failed to parse dates:", dateError);
-            startDate = new Date();
-            endDate = new Date(Date.now() + 3600000);
+          if (eventStart instanceof Date) {
+            eventStartDate = eventStart;
+          } else if (typeof eventStart === "object" && eventStart.toJSDate) {
+            eventStartDate = eventStart.toJSDate();
+          } else {
+            eventStartDate = new Date(eventStart?.toString() || "");
           }
 
-          // 解析分类
-          let category = undefined;
-          if (categoriesProp) {
-            const categoryName = categoriesProp.getFirstValue();
-            if (categoryName) {
-              category = {
-                id: categoryName.toLowerCase(),
-                name: categoryName,
-                color: "blue", // 默认颜色，实际应用中可能需要根据分类名称设置不同颜色
-              };
-            }
-          }
-
-          // 解析标签（从X-TAGS属性或DESCRIPTION中提取）
-          let tags: Array<{ id: string; name: string; color: string }> = [];
-          if (tagsProp) {
-            const tagsString = tagsProp.getFirstValue();
-            if (tagsString) {
-              tags = tagsString.split(",").map((tagName: string) => ({
-                id: tagName.toLowerCase(),
-                name: tagName.trim(),
-                color: "gray", // 默认颜色，实际应用中可能需要根据标签名称设置不同颜色
-              }));
-            }
-          } else if (descriptionProp) {
-            // 尝试从描述中提取标签
-            const descStr = descriptionProp
-              ? descriptionProp.getFirstValue()
-              : "";
-            const tagsMatch = descStr.match(/Tags: ([^\n]+)/);
-            if (tagsMatch) {
-              const tagsString = tagsMatch[1];
-              tags = tagsString.split(",").map((tagName: string) => ({
-                id: tagName.toLowerCase().trim(),
-                name: tagName.trim(),
-                color: "gray",
-              }));
-            }
-          }
-
-          // 解析重复规则
-          let recurrence:
-            | {
-                frequency: string;
-                interval: number;
-                endDate?: string;
-                count?: number;
-              }
-            | undefined = undefined;
-          if (rruleProp) {
-            const rrule = rruleProp.getFirstValue();
-            if (rrule) {
-              recurrence = {
-                frequency: rrule.freq.toLowerCase(),
-                interval: rrule.interval || 1,
-              } as {
-                frequency: string;
-                interval: number;
-                endDate?: string;
-                count?: number;
-              };
-
-              if (rrule.until) {
-                recurrence.endDate = rrule.until.toString();
-              } else if (rrule.count) {
-                recurrence.count = rrule.count;
-              }
-            }
-          }
-
-          return {
-            uid: uidProp ? uidProp.getFirstValue() : event.url,
-            summary: summaryProp ? summaryProp.getFirstValue() : "无标题事件",
-            start: {
-              dateTime: startDate.toISOString(),
-            },
-            end: {
-              dateTime: endDate.toISOString(),
-            },
-            category,
-            tags,
-            recurrence,
-          };
+          // 检查事件是否在请求的日期范围内
+          return eventStartDate >= startFilter && eventStartDate <= endFilter;
+        } catch {
+          return true; // 如果解析失败，不过滤（兼容旧行为）
         }
-      } catch (e) {
-        console.warn("Failed to parse event:", e);
-      }
+      })
+      .map((event) => {
+        try {
+          // 解析ICS内容
+          const jcal = icalModule.default.parse(event.data.toString());
+          const comp = new icalModule.default.Component(jcal);
+          const vevent = comp.getFirstSubcomponent("vevent");
 
-      // 默认返回值
-      return {
-        uid: event.url,
-        summary: "无标题事件",
-        start: { dateTime: new Date().toISOString() },
-        end: { dateTime: new Date(Date.now() + 3600000).toISOString() },
-      };
-    });
+          if (vevent) {
+            const startProp = vevent.getFirstProperty("dtstart");
+            const endProp = vevent.getFirstProperty("dtend");
+            const summaryProp = vevent.getFirstProperty("summary");
+            const uidProp = vevent.getFirstProperty("uid");
+            const categoriesProp = vevent.getFirstProperty("categories");
+            const tagsProp = vevent.getFirstProperty("x-tags");
+            const rruleProp = vevent.getFirstProperty("rrule");
+            const descriptionProp = vevent.getFirstProperty("description");
+
+            let startDate, endDate;
+
+            try {
+              startDate = startProp ? startProp.getFirstValue() : new Date();
+              endDate = endProp
+                ? endProp.getFirstValue()
+                : new Date(Date.now() + 3600000);
+
+              // 更安全的日期处理
+              if (!(startDate instanceof Date)) {
+                if (typeof startDate === "string") {
+                  startDate = new Date(startDate);
+                } else if (startDate && typeof startDate === "object") {
+                  // 处理ical.js返回的日期对象
+                  if (
+                    startDate.toJSDate &&
+                    typeof startDate.toJSDate === "function"
+                  ) {
+                    startDate = startDate.toJSDate();
+                  } else if (startDate._time) {
+                    startDate = new Date(startDate._time);
+                  } else {
+                    // 尝试获取日期字符串表示
+                    const dateStr = startDate.toString
+                      ? startDate.toString()
+                      : null;
+                    startDate = dateStr ? new Date(dateStr) : new Date();
+                  }
+                } else {
+                  startDate = new Date();
+                }
+              }
+
+              if (!(endDate instanceof Date)) {
+                if (typeof endDate === "string") {
+                  endDate = new Date(endDate);
+                } else if (endDate && typeof endDate === "object") {
+                  // 处理ical.js返回的日期对象
+                  if (
+                    endDate.toJSDate &&
+                    typeof endDate.toJSDate === "function"
+                  ) {
+                    endDate = endDate.toJSDate();
+                  } else if (endDate._time) {
+                    endDate = new Date(endDate._time);
+                  } else {
+                    // 尝试获取日期字符串表示
+                    const dateStr = endDate.toString
+                      ? endDate.toString()
+                      : null;
+                    endDate = dateStr
+                      ? new Date(dateStr)
+                      : new Date(Date.now() + 3600000);
+                  }
+                } else {
+                  endDate = new Date(Date.now() + 3600000);
+                }
+              }
+            } catch (dateError) {
+              console.warn("Failed to parse dates:", dateError);
+              startDate = new Date();
+              endDate = new Date(Date.now() + 3600000);
+            }
+
+            // 解析分类
+            let category = undefined;
+            if (categoriesProp) {
+              const categoryName = categoriesProp.getFirstValue();
+              if (categoryName) {
+                category = {
+                  id: categoryName.toLowerCase(),
+                  name: categoryName,
+                  color: "blue", // 默认颜色，实际应用中可能需要根据分类名称设置不同颜色
+                };
+              }
+            }
+
+            // 解析标签（从X-TAGS属性或DESCRIPTION中提取）
+            let tags: Array<{ id: string; name: string; color: string }> = [];
+            if (tagsProp) {
+              const tagsString = tagsProp.getFirstValue();
+              if (tagsString) {
+                tags = tagsString.split(",").map((tagName: string) => ({
+                  id: tagName.toLowerCase(),
+                  name: tagName.trim(),
+                  color: "gray", // 默认颜色，实际应用中可能需要根据标签名称设置不同颜色
+                }));
+              }
+            } else if (descriptionProp) {
+              // 尝试从描述中提取标签
+              const descStr = descriptionProp
+                ? descriptionProp.getFirstValue()
+                : "";
+              const tagsMatch = descStr.match(/Tags: ([^\n]+)/);
+              if (tagsMatch) {
+                const tagsString = tagsMatch[1];
+                tags = tagsString.split(",").map((tagName: string) => ({
+                  id: tagName.toLowerCase().trim(),
+                  name: tagName.trim(),
+                  color: "gray",
+                }));
+              }
+            }
+
+            // 解析重复规则
+            let recurrence:
+              | {
+                  frequency: string;
+                  interval: number;
+                  endDate?: string;
+                  count?: number;
+                }
+              | undefined = undefined;
+            if (rruleProp) {
+              const rrule = rruleProp.getFirstValue();
+              if (rrule) {
+                recurrence = {
+                  frequency: rrule.freq.toLowerCase(),
+                  interval: rrule.interval || 1,
+                } as {
+                  frequency: string;
+                  interval: number;
+                  endDate?: string;
+                  count?: number;
+                };
+
+                if (rrule.until) {
+                  recurrence.endDate = rrule.until.toString();
+                } else if (rrule.count) {
+                  recurrence.count = rrule.count;
+                }
+              }
+            }
+
+            return {
+              uid: uidProp ? uidProp.getFirstValue() : event.url,
+              summary: summaryProp ? summaryProp.getFirstValue() : "无标题事件",
+              start: {
+                dateTime: startDate.toISOString(),
+              },
+              end: {
+                dateTime: endDate.toISOString(),
+              },
+              category,
+              tags,
+              recurrence,
+            };
+          }
+        } catch (e) {
+          console.warn("Failed to parse event:", e);
+        }
+
+        // 默认返回值
+        return {
+          uid: event.url,
+          summary: "无标题事件",
+          start: { dateTime: new Date().toISOString() },
+          end: { dateTime: new Date(Date.now() + 3600000).toISOString() },
+        };
+      });
 
     res.json(parsedEvents);
   } catch (error) {
@@ -267,102 +300,23 @@ calendarRouter.post("/events", async (req, res) => {
       return res.status(404).json({ error: "Calendar not found" });
     }
 
-    // Generate UID and timestamps
+    // Generate UID
     const uid = `radicale-desktop-${Date.now()}-${Math.random()
       .toString(36)
       .substring(2, 11)}`;
 
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    const dtstamp = new Date()
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d+/, "");
-
-    // Format dates according to RFC 5545
-    let dtstart, dtend;
-    if (allDay) {
-      // For all-day events, use DATE format (YYYYMMDD)
-      dtstart = startDate.toISOString().slice(0, 10).replace(/-/g, "");
-      dtend = endDate.toISOString().slice(0, 10).replace(/-/g, "");
-    } else {
-      // For timed events, use DATE-TIME format (YYYYMMDDTHHMMSSZ)
-      dtstart = startDate
-        .toISOString()
-        .replace(/[-:]/g, "")
-        .replace(/\.\d+/, "");
-      dtend = endDate.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-    }
-
-    // Build ICS content manually without ical.js
-    const icsLines = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//CalDAV Desktop//EN",
-      "BEGIN:VEVENT",
-      `UID:${uid}`,
-      `DTSTAMP:${dtstamp}`,
-      `DTSTART${allDay ? ";VALUE=DATE" : ""}:${dtstart}`,
-      `DTEND${allDay ? ";VALUE=DATE" : ""}:${dtend}`,
-      `SUMMARY:${title}`,
-      ...(description ? [`DESCRIPTION:${description}`] : []),
-    ];
-
-    // 添加分类
-    if (category && category.name) {
-      icsLines.push(`CATEGORIES:${category.name}`);
-    }
-
-    // 添加标签到描述中（因为CATEGORIES只用于分类）
-    if (tags && Array.isArray(tags) && tags.length > 0) {
-      const tagNames = tags.map((tag) => tag.name).join(", ");
-      // 如果已有描述，则追加标签信息
-      if (description) {
-        icsLines.push(`DESCRIPTION:${description}\\n\\nTags: ${tagNames}`);
-      } else {
-        icsLines.push(`DESCRIPTION:Tags: ${tagNames}`);
-      }
-    }
-
-    // 添加重复规则
-    if (recurrence) {
-      let rrule = "RRULE:";
-      switch (recurrence.frequency) {
-        case "daily":
-          rrule += "FREQ=DAILY";
-          break;
-        case "weekly":
-          rrule += "FREQ=WEEKLY";
-          break;
-        case "monthly":
-          rrule += "FREQ=MONTHLY";
-          break;
-        case "yearly":
-          rrule += "FREQ=YEARLY";
-          break;
-      }
-
-      if (recurrence.interval && recurrence.interval > 1) {
-        rrule += `;INTERVAL=${recurrence.interval}`;
-      }
-
-      if (recurrence.endDate) {
-        const endDate = new Date(recurrence.endDate);
-        const formattedEndDate = endDate
-          .toISOString()
-          .slice(0, 10)
-          .replace(/-/g, "");
-        rrule += `;UNTIL=${formattedEndDate}`;
-      } else if (recurrence.count) {
-        rrule += `;COUNT=${recurrence.count}`;
-      }
-
-      icsLines.push(rrule);
-    }
-
-    icsLines.push("END:VEVENT", "END:VCALENDAR");
-
-    const icsContent = icsLines.join("\r\n");
+    // Build ICS content using shared function
+    const icsContent = buildICSContent({
+      uid,
+      title,
+      start,
+      end,
+      allDay,
+      description,
+      category,
+      tags,
+      recurrence,
+    });
 
     // Create the event in CalDAV
     const createdEvent = await davClient.createCalendarObject({
@@ -423,99 +377,18 @@ calendarRouter.put("/events/:uid", async (req, res) => {
       return res.status(404).json({ error: "Event not found" });
     }
 
-    // Generate timestamps
-    const dtstamp = new Date()
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d+/, "");
-
-    // Format dates
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-
-    let dtstart, dtend;
-    if (allDay) {
-      // For all-day events, use DATE format (YYYYMMDD)
-      dtstart = startDate.toISOString().slice(0, 10).replace(/-/g, "");
-      dtend = endDate.toISOString().slice(0, 10).replace(/-/g, "");
-    } else {
-      // For timed events, use DATE-TIME format (YYYYMMDDTHHMMSSZ)
-      dtstart = startDate
-        .toISOString()
-        .replace(/[-:]/g, "")
-        .replace(/\.\d+/, "");
-      dtend = endDate.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-    }
-
-    // Build ICS content manually without ical.js
-    const icsLines = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//CalDAV Desktop//EN",
-      "BEGIN:VEVENT",
-      `UID:${uid}`,
-      `DTSTAMP:${dtstamp}`,
-      `DTSTART${allDay ? ";VALUE=DATE" : ""}:${dtstart}`,
-      `DTEND${allDay ? ";VALUE=DATE" : ""}:${dtend}`,
-      `SUMMARY:${title}`,
-      ...(description ? [`DESCRIPTION:${description}`] : []),
-    ];
-
-    // 添加分类
-    if (category && category.name) {
-      icsLines.push(`CATEGORIES:${category.name}`);
-    }
-
-    // 添加标签到描述中（因为CATEGORIES只用于分类）
-    if (tags && Array.isArray(tags) && tags.length > 0) {
-      const tagNames = tags.map((tag) => tag.name).join(", ");
-      // 如果已有描述，则追加标签信息
-      if (description) {
-        icsLines.push(`DESCRIPTION:${description}\\n\\nTags: ${tagNames}`);
-      } else {
-        icsLines.push(`DESCRIPTION:Tags: ${tagNames}`);
-      }
-    }
-
-    // 添加重复规则
-    if (recurrence) {
-      let rrule = "RRULE:";
-      switch (recurrence.frequency) {
-        case "daily":
-          rrule += "FREQ=DAILY";
-          break;
-        case "weekly":
-          rrule += "FREQ=WEEKLY";
-          break;
-        case "monthly":
-          rrule += "FREQ=MONTHLY";
-          break;
-        case "yearly":
-          rrule += "FREQ=YEARLY";
-          break;
-      }
-
-      if (recurrence.interval && recurrence.interval > 1) {
-        rrule += `;INTERVAL=${recurrence.interval}`;
-      }
-
-      if (recurrence.endDate) {
-        const endDate = new Date(recurrence.endDate);
-        const formattedEndDate = endDate
-          .toISOString()
-          .slice(0, 10)
-          .replace(/-/g, "");
-        rrule += `;UNTIL=${formattedEndDate}`;
-      } else if (recurrence.count) {
-        rrule += `;COUNT=${recurrence.count}`;
-      }
-
-      icsLines.push(rrule);
-    }
-
-    icsLines.push("END:VEVENT", "END:VCALENDAR");
-
-    const icsContent = icsLines.join("\r\n");
+    // Build ICS content using shared function
+    const icsContent = buildICSContent({
+      uid,
+      title,
+      start,
+      end,
+      allDay,
+      description,
+      category,
+      tags,
+      recurrence,
+    });
 
     // Delete the old event and create a new one (since updateCalendarObject doesn't accept iCalString)
     await davClient.deleteCalendarObject({
@@ -548,7 +421,7 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
     // Get the target calendar
     const cals = await davClient.fetchCalendars();
     let targetCal = cals[0];
-    if (calendarUrl && typeof calendarUrl === 'string') {
+    if (calendarUrl && typeof calendarUrl === "string") {
       targetCal = cals.find((cal) => cal.url === calendarUrl) || cals[0];
     }
 
@@ -571,19 +444,21 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
     let eventToDelete = null;
     for (const event of events) {
       // 直接匹配UID（多种变体）
-      if (event.url.includes(uid) ||
-          event.url.includes(`${uid}.ics`) ||
-          event.url.endsWith(`/${uid}`) ||
-          event.url.endsWith(`/${uid}.ics`)) {
+      if (
+        event.url.includes(uid) ||
+        event.url.includes(`${uid}.ics`) ||
+        event.url.endsWith(`/${uid}`) ||
+        event.url.endsWith(`/${uid}.ics`)
+      ) {
         eventToDelete = event;
         console.log(`Found event by URL match: ${event.url}`);
         break;
       }
 
       // 从URL中提取UID进行匹配
-      const urlParts = event.url.split('/');
-      const urlUid = urlParts[urlParts.length - 1].replace('.ics', '');
-      const normalizedUid = uid.replace('.ics', ''); // 移除可能的.ics后缀
+      const urlParts = event.url.split("/");
+      const urlUid = urlParts[urlParts.length - 1].replace(".ics", "");
+      const normalizedUid = uid.replace(".ics", ""); // 移除可能的.ics后缀
       if (urlUid === normalizedUid || urlUid === uid) {
         eventToDelete = event;
         console.log(`Found event by extracted UID: ${urlUid}`);
@@ -612,20 +487,25 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
             break;
           }
         }
-      } catch (parseError) {
+      } catch (parseError: unknown) {
         // 解析失败则跳过
-        console.warn(`Failed to parse event data for UID matching: ${parseError.message}`);
+        const error = parseError as Error;
+        console.warn(
+          `Failed to parse event data for UID matching: ${error.message}`,
+        );
       }
     }
 
     // 即使找不到事件，我们也返回成功，因为结果是一样的（事件不存在）
     if (!eventToDelete) {
-      console.warn(`Event with uid ${uid} not found in calendar ${targetCal.url}`);
+      console.warn(
+        `Event with uid ${uid} not found in calendar ${targetCal.url}`,
+      );
       // 返回更详细的响应，说明可能的原因
       return res.json({
         success: true,
         message: "Event not found, but considering deletion successful",
-        details: `Could not find event with UID '${uid}' in calendar. It may have already been deleted or the UID format may differ.`
+        details: `Could not find event with UID '${uid}' in calendar. It may have already been deleted or the UID format may differ.`,
       });
     }
 
@@ -640,21 +520,143 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
   } catch (error) {
     console.error(`Error deleting event with uid ${req.params.uid}:`, error);
     // 对于某些特定错误，我们可以考虑返回成功
-    if (error instanceof Error && (error.message.includes('Not Found') || error.message.includes('404'))) {
-      console.warn('Event not found during deletion, considering operation successful');
+    if (
+      error instanceof Error &&
+      (error.message.includes("Not Found") || error.message.includes("404"))
+    ) {
+      console.warn(
+        "Event not found during deletion, considering operation successful",
+      );
       return res.json({
         success: true,
         message: "Event not found, but considering deletion successful",
-        details: "The event appears to be already deleted or not found."
+        details: "The event appears to be already deleted or not found.",
       });
     }
 
     res.status(500).json({
       error: (error as Error).message,
-      details: "An unexpected error occurred while deleting the event. Please try again."
+      details:
+        "An unexpected error occurred while deleting the event. Please try again.",
     });
   }
 });
+
+// ===== 共享工具函数 =====
+
+// 构建ICS内容
+export function buildICSContent(params: {
+  uid: string;
+  title: string;
+  start: string;
+  end: string;
+  allDay?: boolean;
+  description?: string;
+  category?: { name?: string };
+  tags?: Array<{ name: string }>;
+  recurrence?: {
+    frequency: string;
+    interval?: number;
+    endDate?: string;
+    count?: number;
+  };
+}): string {
+  const {
+    uid,
+    title,
+    start,
+    end,
+    allDay,
+    description,
+    category,
+    tags,
+    recurrence,
+  } = params;
+
+  const dtstamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d+/, "");
+
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+
+  let dtstart: string, dtend: string;
+  if (allDay) {
+    dtstart = startDate.toISOString().slice(0, 10).replace(/-/g, "");
+    dtend = endDate.toISOString().slice(0, 10).replace(/-/g, "");
+  } else {
+    dtstart = startDate.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    dtend = endDate.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  }
+
+  const icsLines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//CalDAV Desktop//EN",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${dtstamp}`,
+    `DTSTART${allDay ? ";VALUE=DATE" : ""}:${dtstart}`,
+    `DTEND${allDay ? ";VALUE=DATE" : ""}:${dtend}`,
+    `SUMMARY:${title}`,
+    ...(description ? [`DESCRIPTION:${description}`] : []),
+  ];
+
+  // 添加分类
+  if (category?.name) {
+    icsLines.push(`CATEGORIES:${category.name}`);
+  }
+
+  // 添加标签到描述中
+  if (tags && Array.isArray(tags) && tags.length > 0) {
+    const tagNames = tags.map((tag: { name: string }) => tag.name).join(", ");
+    if (description) {
+      icsLines.push(`DESCRIPTION:${description}\\n\\nTags: ${tagNames}`);
+    } else {
+      icsLines.push(`DESCRIPTION:Tags: ${tagNames}`);
+    }
+  }
+
+  // 添加重复规则
+  if (recurrence) {
+    let rrule = "RRULE:";
+    switch (recurrence.frequency) {
+      case "daily":
+        rrule += "FREQ=DAILY";
+        break;
+      case "weekly":
+        rrule += "FREQ=WEEKLY";
+        break;
+      case "monthly":
+        rrule += "FREQ=MONTHLY";
+        break;
+      case "yearly":
+        rrule += "FREQ=YEARLY";
+        break;
+    }
+
+    if (recurrence.interval && recurrence.interval > 1) {
+      rrule += `;INTERVAL=${recurrence.interval}`;
+    }
+
+    if (recurrence.endDate) {
+      const endDate = new Date(recurrence.endDate);
+      const formattedEndDate = endDate
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, "");
+      rrule += `;UNTIL=${formattedEndDate}`;
+    } else if (recurrence.count) {
+      rrule += `;COUNT=${recurrence.count}`;
+    }
+
+    icsLines.push(rrule);
+  }
+
+  icsLines.push("END:VEVENT", "END:VCALENDAR");
+  return icsLines.join("\r\n");
+}
 
 // Configuration management endpoints
 calendarRouter.get("/config", async (_, res) => {

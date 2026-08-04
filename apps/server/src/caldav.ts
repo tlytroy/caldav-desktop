@@ -13,13 +13,30 @@ export let currentConfig: CalDAVConfig = {
   password: process.env.CALDAV_PASS || "",
 };
 
-export const davClient = new DAVClient({
-  serverUrl: currentConfig.url,
-  credentials: {
-    username: currentConfig.username,
-    password: currentConfig.password,
+// Lazy-initialized DAVClient - created on first use
+let _davClient: DAVClient | null = null;
+
+function getDavClient(): DAVClient {
+  if (!_davClient) {
+    _davClient = new DAVClient({
+      serverUrl: currentConfig.url,
+      credentials: {
+        username: currentConfig.username,
+        password: currentConfig.password,
+      },
+      authMethod: "Basic",
+    });
+  }
+  return _davClient;
+}
+
+// Export a proxy that delegates to the lazy client
+export const davClient = new Proxy({} as DAVClient, {
+  get(_target, prop: keyof DAVClient) {
+    const client = getDavClient();
+    const value = client[prop];
+    return typeof value === "function" ? value.bind(client) : value;
   },
-  authMethod: "Basic",
 });
 
 // Store the account after login
@@ -28,11 +45,15 @@ export let currentAccount: DAVAccount | null = null;
 // Update the client configuration
 export function setServerConfig(config: CalDAVConfig) {
   currentConfig = config;
-  davClient.serverUrl = config.url;
-  davClient.credentials = {
-    username: config.username,
-    password: config.password,
-  };
+  // Recreate client with new config
+  _davClient = new DAVClient({
+    serverUrl: config.url,
+    credentials: {
+      username: config.username,
+      password: config.password,
+    },
+    authMethod: "Basic",
+  });
   // Reset account to force re-authentication
   currentAccount = null;
 }
@@ -92,7 +113,7 @@ export async function initializeClient() {
 
     const calendars = await davClient.fetchCalendars();
     console.log(
-      `✓ Connected to CalDAV server. Found ${calendars.length} calendar(s)`
+      `✓ Connected to CalDAV server. Found ${calendars.length} calendar(s)`,
     );
     calendars.forEach((cal: any) => {
       console.log(`  - ${cal.displayName || cal.url}`);
@@ -103,11 +124,11 @@ export async function initializeClient() {
     console.warn(`  URL: ${currentConfig.url}`);
     console.warn(`  User: ${currentConfig.username}`);
     console.warn(
-      "  Ensure .env has correct CALDAV_URL, CALDAV_USER, CALDAV_PASS"
+      "  Ensure .env has correct CALDAV_URL, CALDAV_USER, CALDAV_PASS",
     );
     console.warn("  Server will continue running for development purposes");
     console.warn(
-      `  Error: ${error instanceof Error ? error.message : String(error)}`
+      `  Error: ${error instanceof Error ? error.message : String(error)}`,
     );
     return [];
   }

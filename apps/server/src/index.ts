@@ -5,7 +5,7 @@ import { initializeClient } from "./caldav.js";
 import { calendarRouter } from "./routes/calendar.js";
 
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
@@ -26,7 +26,7 @@ async function start() {
     app.listen(PORT, () => {
       console.log(`\n🚀 Server running at http://localhost:${PORT}`);
       console.log(
-        `📅 Calendar API: http://localhost:${PORT}/api/calendar/calendars`
+        `📅 Calendar API: http://localhost:${PORT}/api/calendar/calendars`,
       );
     });
   } catch (error) {

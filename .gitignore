@@ -22,3 +22,9 @@ apps/*/build/
 *.zip
 # Unpacked directories
 *-unpacked/
+
+# Android SDK directories
+build-tools/
+platform-tools/
+platforms/
+licenses/

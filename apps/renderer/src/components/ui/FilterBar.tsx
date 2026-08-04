@@ -71,11 +71,14 @@ export function FilterBar({ onFilterChange }: FilterBarProps) {
               onClick={() => handleCategoryChange(category.id)}
               className={`px-3 py-1 text-sm rounded-full transition-colors ${
                 eventFilter.categoryId === category.id
-                  ? `text-white ${category.color === '#3b82f6' ? 'bg-blue-500' :
-                                 category.color === '#10b981' ? 'bg-green-500' :
-                                 category.color === '#f59e0b' ? 'bg-yellow-500' : 'bg-gray-500'}`
+                  ? 'text-white'
                   : 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-500'
               }`}
+              style={
+                eventFilter.categoryId === category.id
+                  ? { backgroundColor: category.color }
+                  : undefined
+              }
             >
               {category.name}
             </button>
@@ -93,10 +96,14 @@ export function FilterBar({ onFilterChange }: FilterBarProps) {
               onClick={() => handleTagToggle(tag.id)}
               className={`px-3 py-1 text-sm rounded-full transition-colors ${
                 eventFilter.tagIds?.includes(tag.id)
-                  ? `text-white ${tag.color === '#ef4444' ? 'bg-red-500' :
-                                tag.color === '#f97316' ? 'bg-orange-500' : 'bg-gray-500'}`
+                  ? 'text-white'
                   : 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-500'
               }`}
+              style={
+                eventFilter.tagIds?.includes(tag.id)
+                  ? { backgroundColor: tag.color }
+                  : undefined
+              }
             >
               {tag.name}
             </button>

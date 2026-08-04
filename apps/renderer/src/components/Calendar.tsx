@@ -12,7 +12,7 @@ import { TagSelector } from './ui/TagSelector';
 import { RecurrenceEditor } from './ui/RecurrenceEditor';
 import { LoadingSpinner } from './ui/LoadingSpinner';
 import { Modal } from './ui/Modal';
-import { createCalendarEventFromForm, updateCalendarEventFromForm, deleteCalendarEvent } from '../api/calendar';
+import { createCalendarEvent, updateCalendarEvent, deleteCalendarEvent } from '../api/calendar';
 import type { EventFormData } from '../types';
 import { useThemeStore } from '../store/themeStore';
 
@@ -148,7 +148,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
         try {
           if (formData.id) {
             // 更新现有事件
-            await updateCalendarEventFromForm(formData.id, calendarUrl, {
+            await updateCalendarEvent(formData.id, calendarUrl, {
               title: formData.title,
               start: formData.start,
               end: formData.end,
@@ -160,7 +160,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
             });
           } else {
             // 创建新事件
-            await createCalendarEventFromForm(calendarUrl, {
+            await createCalendarEvent(calendarUrl, {
               title: formData.title,
               start: formData.start,
               end: formData.end,
@@ -210,9 +210,11 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
         setEventToDelete(null);
 
         // 立即从本地缓存中移除事件
-        // 注意：这里我们不等待服务器响应，而是立即更新UI
-        // 实际的服务器同步将在后台进行
         removeEventFromCache(calendarUrl, eventToDelete.id);
+        
+        // 调用后端API删除事件
+        console.log('正在删除事件:', eventToDelete.id);
+        await deleteCalendarEvent(calendarUrl, eventToDelete.id);
         
         // 显示成功消息
         console.log('事件删除成功，正在后台同步...');
@@ -220,8 +222,6 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
         // 在后台执行同步操作
         forceSync().catch(err => {
           console.error('后台同步失败:', err);
-          // 如果后台同步失败，可以在UI上显示一个小提示
-          // 或者在下次应用启动时重试
         });
       } catch (err) {
         console.error('删除事件时发生错误:', err);

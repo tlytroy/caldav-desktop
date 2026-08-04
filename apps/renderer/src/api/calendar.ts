@@ -63,60 +63,53 @@ export async function fetchCalendarEvents(
   }));
 }
 
-// 创建事件 (接受CalendarEvent格式)
+// 事件数据可以是 CalendarEvent 格式（string 类型日期）或 EventFormData 格式（Date 类型日期）
+type EventInputData =
+  | Omit<CalendarEvent, "id">
+  | {
+      title: string;
+      start: Date | string;
+      end: Date | string;
+      allDay?: boolean;
+      description?: string;
+      category?: unknown;
+      tags?: unknown[];
+      recurrence?: unknown;
+    };
+
+// 将事件数据中的 Date 字段转为 ISO 字符串
+function serializeEventData(
+  eventData: EventInputData,
+): Record<string, unknown> {
+  const data = { ...eventData } as Record<string, unknown>;
+  if (data.start instanceof Date) {
+    data.start = data.start.toISOString();
+  }
+  if (data.end instanceof Date) {
+    data.end = data.end.toISOString();
+  }
+  return data;
+}
+
+// 创建事件
 export async function createCalendarEvent(
   calendarUrl: string,
-  eventData: Omit<CalendarEvent, "id">,
+  eventData: EventInputData,
 ): Promise<void> {
   await api.post("/api/calendar/events", {
-    ...eventData,
+    ...serializeEventData(eventData),
     calendarUrl,
   });
 }
 
-// 更新事件 (接受CalendarEvent格式)
+// 更新事件
 export async function updateCalendarEvent(
   eventId: string,
   calendarUrl: string,
-  eventData: Omit<CalendarEvent, "id">,
+  eventData: EventInputData,
 ): Promise<void> {
   await api.put(`/api/calendar/events/${eventId}`, {
-    ...eventData,
-    calendarUrl,
-  });
-}
-
-// 创建事件 (接受EventFormData格式)
-export async function createCalendarEventFromForm(
-  calendarUrl: string,
-  formData: Omit<import("../types").EventFormData, "id">,
-): Promise<void> {
-  const eventData: Omit<CalendarEvent, "id"> = {
-    ...formData,
-    start: formData.start.toISOString(),
-    end: formData.end.toISOString(),
-  };
-
-  await api.post("/api/calendar/events", {
-    ...eventData,
-    calendarUrl,
-  });
-}
-
-// 更新事件 (接受EventFormData格式)
-export async function updateCalendarEventFromForm(
-  eventId: string,
-  calendarUrl: string,
-  formData: Omit<import("../types").EventFormData, "id">,
-): Promise<void> {
-  const eventData: Omit<CalendarEvent, "id"> = {
-    ...formData,
-    start: formData.start.toISOString(),
-    end: formData.end.toISOString(),
-  };
-
-  await api.put(`/api/calendar/events/${eventId}`, {
-    ...eventData,
+    ...serializeEventData(eventData),
     calendarUrl,
   });
 }
@@ -142,7 +135,6 @@ export async function deleteCalendarEvent(
       console.warn(
         `Event ${eventId} not found on server, it may have already been deleted`,
       );
-      // 在这里我们可以选择忽略404错误，因为结果是一样的（事件不存在）
       return {
         success: true,
         message: "Event not found, possibly already deleted",
