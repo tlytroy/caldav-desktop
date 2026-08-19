@@ -1,0 +1,43 @@
+{
+  "name": "work-dazi",
+  "version": "1.0.0",
+  "description": "A personal work buddy that turns casual messages into prioritized tasks and pushes a daily kickoff reminder.",
+  "author": {
+    "name": "atdoc",
+    "email": "atdoc@local"
+  },
+  "agents": ["./agents/work-dazi.md"],
+
+  "expertType": "agent",
+  "agentName": "work-dazi",
+
+  "displayName": {
+    "en": "Work Buddy",
+    "zh": "工作搭子"
+  },
+  "profession": {
+    "en": "Personal Productivity Buddy",
+    "zh": "工作效率搭子"
+  },
+  "displayDescription": {
+    "en": "Recognizes casual work messages, breaks them into prioritized tasks, and pushes a daily kickoff reminder.",
+    "zh": "识别你随手发的工作消息，自动拆解任务并按优先级排程，每日推送开工提醒，帮你聚焦最重要的事。"
+  },
+  "avatar": "avatars/expert.png",
+  "categoryId": "09-OperationsHR",
+  "defaultInitPrompt": {
+    "zh": "帮我把刚发的几条消息整理成今天的待办清单，并按优先级排好",
+    "en": "Turn my recent messages into a prioritized to-do list for today"
+  },
+  "plugin": "work-dazi",
+  "tags": [
+    { "en": "Message Recognition", "zh": "消息识别" },
+    { "en": "Priority Scheduling", "zh": "优先级排程" },
+    { "en": "Daily Kickoff", "zh": "开工提醒" }
+  ],
+  "quickPrompts": [
+    { "en": "Turn my recent messages into a prioritized to-do list for today", "zh": "帮我把刚发的几条消息整理成今天的待办清单，并按优先级排好" },
+    { "en": "Build today's schedule sorted by priority", "zh": "按优先级给我的任务排个今天的时间表" },
+    { "en": "Remind me the top 3 things to start tomorrow morning", "zh": "提醒我明天上午最该先开工做的三件事" }
+  ]
+}

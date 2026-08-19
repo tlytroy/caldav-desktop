@@ -3,6 +3,8 @@ import express from "express";
 import cors from "cors";
 import { initializeClient } from "./caldav.js";
 import { calendarRouter } from "./routes/calendar.js";
+import { mdBridgeRouter } from "./routes/md-bridge.js";
+import { loadBridgeConfig } from "./md-ics-bridge.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -17,6 +19,9 @@ app.get("/health", (_, res) => {
 
 // Calendar routes
 app.use("/api/calendar", calendarRouter);
+
+// MD ↔ ICS Bridge routes
+app.use("/api/md-bridge", mdBridgeRouter);
 
 async function start() {
   try {

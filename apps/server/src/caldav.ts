@@ -1,10 +1,17 @@
 import { DAVClient, DAVAccount, DAVCalendar } from "tsdav";
+import { createProxyFetch } from "./proxy-fetch";
 
 interface CalDAVConfig {
   url: string;
   username: string;
   password: string;
 }
+
+// Create a proxy-aware fetch if HTTPS_PROXY is set
+const HTTPS_PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || "";
+const HTTP_PROXY = process.env.HTTP_PROXY || process.env.http_proxy || "";
+const HAS_PROXY = !!(HTTPS_PROXY || HTTP_PROXY);
+const proxyFetch = HAS_PROXY ? createProxyFetch() : undefined;
 
 // Store current config
 export let currentConfig: CalDAVConfig = {
@@ -25,7 +32,8 @@ function getDavClient(): DAVClient {
         password: currentConfig.password,
       },
       authMethod: "Basic",
-    });
+      ...(HAS_PROXY ? { fetch: proxyFetch } : {}),
+    } as any);
   }
   return _davClient;
 }
@@ -53,7 +61,8 @@ export function setServerConfig(config: CalDAVConfig) {
       password: config.password,
     },
     authMethod: "Basic",
-  });
+    ...(HAS_PROXY ? { fetch: proxyFetch } : {}),
+  } as any);
   // Reset account to force re-authentication
   currentAccount = null;
 }
@@ -71,7 +80,8 @@ export async function testConnection(config: CalDAVConfig): Promise<{
       password: config.password,
     },
     authMethod: "Basic",
-  });
+    ...(HAS_PROXY ? { fetch: proxyFetch } : {}),
+  } as any);
 
   try {
     await testClient.login();
@@ -153,6 +163,92 @@ export async function ensureAuthenticated(): Promise<DAVAccount> {
     });
   }
   return currentAccount!;
+}
+
+/**
+ * 直接通过 HTTP PROPFIND/GET 获取日历中的所有事件对象
+ * 替代 tsdav 的 fetchCalendarObjects（在某些 Radicale 版本上返回日历集合自身而非事件对象）
+ *
+ * @param calendarUrl 日历 URL
+ * @returns 事件对象数组（包含 url 和 data 属性）
+ */
+export async function fetchCalendarObjectsDirect(
+  calendarUrl: string,
+): Promise<Array<{ url: string; data: string }>> {
+  const baseUrl = calendarUrl.endsWith("/") ? calendarUrl : calendarUrl + "/";
+
+  // Step 1: PROPFIND to list all .ics files
+  const propfindBody = `<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:">
+  <d:prop>
+    <d:getetag/>
+    <d:resourcetype/>
+  </d:prop>
+</d:propfind>`;
+
+  const fetchFn = proxyFetch || globalThis.fetch;
+  const authHeader =
+    "Basic " +
+    Buffer.from(`${currentConfig.username}:${currentConfig.password}`).toString(
+      "base64",
+    );
+
+  const propResp = await fetchFn(baseUrl, {
+    method: "PROPFIND",
+    headers: {
+      "Content-Type": "application/xml; charset=utf-8",
+      Depth: "1",
+      Authorization: authHeader,
+    },
+    body: propfindBody,
+  });
+
+  const propXmlText = await propResp.text();
+
+  // Extract all .ics file hrefs
+  // Radicale uses default namespace (xmlns="DAV:") so href is <href>, not <d:href>
+  // Other servers may use <d:href> or <D:href> etc.
+  const hrefRegex = /<(?:[a-zA-Z]*:)?href>([^<]+\.ics)<\/(?:[a-zA-Z]*:)?href>/g;
+  const results: Array<{ url: string; data: string }> = [];
+  let hrefMatch;
+  let matchCount = 0;
+
+  while ((hrefMatch = hrefRegex.exec(propXmlText)) !== null) {
+    matchCount++;
+    if (matchCount > 100) {
+      console.warn(
+        `[fetchCalendarObjectsDirect] Too many matches (>100), stopping`,
+      );
+      break;
+    }
+    const icsUrl = hrefMatch[1];
+    const fullUrl = icsUrl.startsWith("http")
+      ? icsUrl
+      : new URL(icsUrl, baseUrl).href;
+
+    try {
+      console.log(`[fetchCalendarObjectsDirect] Fetching ${fullUrl}`);
+      const icsResp = await fetchFn(fullUrl, {
+        method: "GET",
+        headers: {
+          Authorization: authHeader,
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      const icsData = await icsResp.text();
+      console.log(
+        `[fetchCalendarObjectsDirect] Got ${icsData.length} bytes from ${fullUrl}`,
+      );
+      results.push({ url: fullUrl, data: icsData });
+    } catch (err) {
+      console.warn(
+        `[fetchCalendarObjectsDirect] Failed to fetch ${icsUrl}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  return results;
 }
 
 // Get current config (without password)

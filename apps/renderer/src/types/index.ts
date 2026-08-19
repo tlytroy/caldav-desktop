@@ -79,3 +79,60 @@ export interface EventFilter {
     end: Date;
   };
 }
+
+// ===== 待办/任务类型 =====
+export type TaskStatus = "pending" | "in-progress" | "completed" | "cancelled";
+
+export interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  status: TaskStatus;
+  priority: "low" | "medium" | "high" | "urgent";
+  dueDate?: string; // ISO date string
+  completedDate?: string; // ISO date string
+  category?: EventCategory;
+  tags?: EventTag[];
+  calendarUrl?: string; // Linked calendar event URL
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ===== Markdown ↔ ICS Bridge Types =====
+export interface ICSConversionResult {
+  success: boolean;
+  message: string;
+  uid?: string;
+  icsContent?: string;
+}
+
+export interface MDConversionResult {
+  success: boolean;
+  message: string;
+  mdContent?: string;
+  uid?: string;
+}
+
+// MD 元数据格式规范 (Front Matter)
+export interface MDFrontMatter {
+  title: string;
+  date: string; // ISO date
+  end?: string; // ISO date (event end)
+  allDay?: boolean;
+  status?: string; // "confirmed" | "tentative" | "cancelled"
+  category?: string;
+  tags?: string[];
+  recurrence?: string; // e.g. "weekly", "monthly"
+  uid?: string; // matching ICS UID for bi-directional sync
+  source?: string; // "caldav" | "manual"
+  updated?: string; // last updated timestamp
+}
+
+// MD 转 ICS 配置
+export interface MDBridgeConfig {
+  enabled: boolean;
+  watchDir: string;
+  syncDirection: "md-to-ics" | "ics-to-md" | "bidirectional";
+  autoSyncMinutes: number;
+  targetCalendarUrl?: string;
+}
