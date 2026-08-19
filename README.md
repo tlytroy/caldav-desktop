@@ -343,9 +343,11 @@ This project was developed with the help of AI coding assistants, demonstrating 
 
 ---
 
-**Last Updated**: 2026-08-18
+**Last Updated**: 2026-08-19
 
 ## 📢 Latest Updates
+
+**August 19, 2026**: MD↔ICS Bridge engine complete — 28/28 end-to-end tests passing. Fixed STATUS mapping (needs-action → NEEDS-ACTION), proxy layer removed in favor of direct HTTPS fetch, CALDAV_ROOT_URL env var for tsdav discovery. All sync operations (push/pull/delete/batch) verified against Radicale production server.
 
 **August 18, 2026**: Architecture redesign with 积木式模块化架构. Created design documents for Dashboard, MD↔ICS Bridge, and introduced work-dazi-toolkit reference implementation. Updated development roadmap for v0.2.0.
 

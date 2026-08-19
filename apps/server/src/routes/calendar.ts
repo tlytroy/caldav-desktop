@@ -8,12 +8,7 @@ import {
   initializeClient,
   currentConfig,
 } from "../caldav.js";
-import { createProxyFetch } from "../proxy-fetch.js";
-
 export const calendarRouter = express.Router();
-
-// 创建一个新的代理 fetch 用于直接 HTTP 请求
-const proxyFetchForUrl = createProxyFetch();
 
 calendarRouter.get("/calendars", async (_, res) => {
   try {
@@ -82,7 +77,7 @@ calendarRouter.get("/events", async (req, res) => {
 
     // 直接发送 CalDAV REPORT 请求
     console.log(`[DEBUG] Sending REPORT to ${baseUrl}`);
-    const response = await proxyFetchForUrl(baseUrl, {
+    const response = await fetch(baseUrl, {
       method: "REPORT",
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
@@ -293,7 +288,7 @@ calendarRouter.get("/events", async (req, res) => {
   </d:prop>
 </d:propfind>`;
 
-      const propResp = await proxyFetchForUrl(baseUrl, {
+      const propResp = await fetch(baseUrl, {
         method: "PROPFIND",
         headers: {
           "Content-Type": "application/xml; charset=utf-8",
@@ -321,7 +316,7 @@ calendarRouter.get("/events", async (req, res) => {
 
         try {
           // 获取每个 ICS 文件的内容
-          const icsResp = await proxyFetchForUrl(fullUrl, {
+          const icsResp = await fetch(fullUrl, {
             method: "GET",
             headers: {
               Authorization:

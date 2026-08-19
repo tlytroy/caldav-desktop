@@ -1,17 +1,10 @@
 import { DAVClient, DAVAccount, DAVCalendar } from "tsdav";
-import { createProxyFetch } from "./proxy-fetch";
 
 interface CalDAVConfig {
   url: string;
   username: string;
   password: string;
 }
-
-// Create a proxy-aware fetch if HTTPS_PROXY is set
-const HTTPS_PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || "";
-const HTTP_PROXY = process.env.HTTP_PROXY || process.env.http_proxy || "";
-const HAS_PROXY = !!(HTTPS_PROXY || HTTP_PROXY);
-const proxyFetch = HAS_PROXY ? createProxyFetch() : undefined;
 
 // Store current config
 export let currentConfig: CalDAVConfig = {
@@ -20,19 +13,24 @@ export let currentConfig: CalDAVConfig = {
   password: process.env.CALDAV_PASS || "",
 };
 
+// Separate root URL for tsdav PROPFIND discovery (different from calendar-specific CALDAV_URL)
+export let caldavRootUrl: string =
+  process.env.CALDAV_ROOT_URL ||
+  process.env.CALDAV_URL ||
+  "http://localhost:5232";
+
 // Lazy-initialized DAVClient - created on first use
 let _davClient: DAVClient | null = null;
 
 function getDavClient(): DAVClient {
   if (!_davClient) {
     _davClient = new DAVClient({
-      serverUrl: currentConfig.url,
+      serverUrl: caldavRootUrl,
       credentials: {
         username: currentConfig.username,
         password: currentConfig.password,
       },
       authMethod: "Basic",
-      ...(HAS_PROXY ? { fetch: proxyFetch } : {}),
     } as any);
   }
   return _davClient;
@@ -53,15 +51,15 @@ export let currentAccount: DAVAccount | null = null;
 // Update the client configuration
 export function setServerConfig(config: CalDAVConfig) {
   currentConfig = config;
+  caldavRootUrl = process.env.CALDAV_ROOT_URL || config.url;
   // Recreate client with new config
   _davClient = new DAVClient({
-    serverUrl: config.url,
+    serverUrl: caldavRootUrl,
     credentials: {
       username: config.username,
       password: config.password,
     },
     authMethod: "Basic",
-    ...(HAS_PROXY ? { fetch: proxyFetch } : {}),
   } as any);
   // Reset account to force re-authentication
   currentAccount = null;
@@ -73,14 +71,18 @@ export async function testConnection(config: CalDAVConfig): Promise<{
   message: string;
   calendars?: DAVCalendar[];
 }> {
+  const testRootUrl =
+    process.env.CALDAV_ROOT_URL ||
+    config.url.replace(/\/root\/.*$/, "") ||
+    config.url;
+
   const testClient = new DAVClient({
-    serverUrl: config.url,
+    serverUrl: testRootUrl,
     credentials: {
       username: config.username,
       password: config.password,
     },
     authMethod: "Basic",
-    ...(HAS_PROXY ? { fetch: proxyFetch } : {}),
   } as any);
 
   try {
@@ -110,7 +112,7 @@ export async function initializeClient() {
     // Then create an account
     currentAccount = await davClient.createAccount({
       account: {
-        serverUrl: currentConfig.url,
+        serverUrl: caldavRootUrl,
         credentials: {
           username: currentConfig.username,
           password: currentConfig.password,
@@ -151,7 +153,7 @@ export async function ensureAuthenticated(): Promise<DAVAccount> {
     // Create account after login
     currentAccount = await davClient.createAccount({
       account: {
-        serverUrl: currentConfig.url,
+        serverUrl: caldavRootUrl,
         credentials: {
           username: currentConfig.username,
           password: currentConfig.password,
@@ -186,14 +188,13 @@ export async function fetchCalendarObjectsDirect(
   </d:prop>
 </d:propfind>`;
 
-  const fetchFn = proxyFetch || globalThis.fetch;
   const authHeader =
     "Basic " +
     Buffer.from(`${currentConfig.username}:${currentConfig.password}`).toString(
       "base64",
     );
 
-  const propResp = await fetchFn(baseUrl, {
+  const propResp = await fetch(baseUrl, {
     method: "PROPFIND",
     headers: {
       "Content-Type": "application/xml; charset=utf-8",
@@ -228,7 +229,7 @@ export async function fetchCalendarObjectsDirect(
 
     try {
       console.log(`[fetchCalendarObjectsDirect] Fetching ${fullUrl}`);
-      const icsResp = await fetchFn(fullUrl, {
+      const icsResp = await fetch(fullUrl, {
         method: "GET",
         headers: {
           Authorization: authHeader,

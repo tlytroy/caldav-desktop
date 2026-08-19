@@ -20,9 +20,20 @@
 - 修复 ICS 解析中 `\r\n` 行尾导致解析失败的问题
 - 支持 push（MD→CalDAV）、pull（CalDAV→MD）、delete sync
 
+**Bug 修复**
+
+- **STATUS 映射修复**：`eventToIcs` 将 `needs-action` 映射为 `NEEDS-ACTION`（而非错误的 `CONFIRMED`），`icsToEvent` 增加 `NEEDS-ACTION → needs-action` 反向映射
+- **测试超时修复**：`afterEach` 超时从 15s 提升到 60s，避免清理操作超时
+- **URL 协议修复**：`.env` 改为 `https://`（Cloudflare 强制 HTTPS，直连无需代理）
+
+**架构调整**
+
+- **移除代理层**：`proxy-fetch.ts` 不再被使用，`caldav.ts` 和 `routes/calendar.ts` 全部改用原生 `fetch()` 直连 Radicale 服务器，消除代理隧道带来的复杂度和潜在的 TLS/SNI 问题
+- **新增 CALDAV_ROOT_URL 环境变量**：供 tsdav DAVClient 做 PROPFIND 发现，与具体日历 URL 分开
+
 **测试覆盖**
 
-- 完整端到端测试套件（28 个测试用例）
+- 完整端到端测试套件（28 个测试用例，全部通过）
 - Part 1：本地 MD 文件操作（8 个测试：初始化、添加、批量、任务、完成、优先级、删除、编辑）
 - Part 2：ICS 转换（4 个测试：全字段、任务、All-day、优先级映射）
 - Part 3：CalDAV 同步（6 个测试：Push、Update、Pull、Delete、完整循环、批量）

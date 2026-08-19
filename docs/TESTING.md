@@ -127,7 +127,8 @@ Then visit http://localhost:5173/ in your browser.
 | ----------------- | ------- | ------- | ------ | ------------ |
 | Backend API       | 9       | 9       | 0      | 100%         |
 | Frontend Features | 7+      | 7+      | 0      | 100%         |
-| **Total**         | **16+** | **16+** | **0**  | **100%**     |
+| E2E (MD Bridge)   | 28      | 28      | 0      | 100%         |
+| **Total**         | **44+** | **44+** | **0**  | **100%**     |
 
 ---
 
@@ -181,5 +182,5 @@ cd apps/renderer && pnpm dev
 
 ---
 
-**Last Updated**: 2026-06-22
+**Last Updated**: 2026-08-19
 **Next Test**: Recommended after each feature change

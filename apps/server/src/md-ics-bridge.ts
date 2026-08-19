@@ -377,7 +377,7 @@ export function eventToIcs(event: BridgeEvent): string {
       confirmed: "CONFIRMED",
       tentative: "TENTATIVE",
       cancelled: "CANCELLED",
-      "needs-action": "CONFIRMED",
+      "needs-action": "NEEDS-ACTION",
     };
     lines.push(`STATUS:${statusMap[event.status] || "CONFIRMED"}`);
   }
@@ -520,6 +520,7 @@ export function icsToEvent(icsContent: string): BridgeEvent | null {
       CONFIRMED: "confirmed",
       TENTATIVE: "tentative",
       CANCELLED: "cancelled",
+      "NEEDS-ACTION": "needs-action",
     };
     event.status = statusMap[statusMatch[1].trim()] || "confirmed";
   }

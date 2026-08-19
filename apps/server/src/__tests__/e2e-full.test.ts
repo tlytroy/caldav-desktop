@@ -402,7 +402,7 @@ describe("E2E: MD Bridge Full Suite", () => {
         }
       }
       remoteUidsToCleanup.length = 0;
-    }, 15000);
+    }, 60000);
 
     it("3.1 Push: MD 事件 → CalDAV（新建事件同步到服务器）", async () => {
       const eventsFile = ensureEventsFile(mdEventsPath);

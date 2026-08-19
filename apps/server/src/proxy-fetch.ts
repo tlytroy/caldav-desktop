@@ -1,11 +1,12 @@
 /**
- * Custom fetch implementation that routes HTTPS requests through an HTTP proxy
+ * Custom fetch implementation that routes HTTP(S) requests through an HTTP proxy
  * using `node:https` and `node:http` modules, bypassing undici's proxy issues.
  *
  * Usage: pass to tsdav DAVClient as the `fetch` parameter.
  */
 import http from "node:http";
 import tls from "node:tls";
+import net from "node:net";
 
 // Detect proxy from environment
 const HTTPS_PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || "";
@@ -16,7 +17,7 @@ const NO_PROXY = (process.env.NO_PROXY || process.env.no_proxy || "")
   .filter(Boolean);
 
 function shouldProxy(url: string): boolean {
-  if (!HTTPS_PROXY) return false;
+  if (!HTTPS_PROXY && !HTTP_PROXY) return false;
   try {
     const u = new URL(url);
     const host = u.hostname;
@@ -63,7 +64,7 @@ function headersToRecord(headers: any): Record<string, string> {
 
 /**
  * A drop-in replacement for the global `fetch` function that routes
- * HTTPS requests through an HTTP CONNECT proxy.
+ * HTTP(S) requests through an HTTP CONNECT proxy.
  *
  * If proxyUrl is not provided, reads from HTTPS_PROXY / HTTP_PROXY env vars.
  */
@@ -97,11 +98,6 @@ export function createProxyFetch(proxyUrl?: string): typeof fetch {
           : (input as Request).url;
     const url = new URL(urlStr);
 
-    // Only proxy HTTPS requests through CONNECT tunnel
-    // Use effectiveProxyUrl to determine if we should proxy
-    if (url.protocol !== "https:") {
-      return fetch(input, init);
-    }
     // Check NO_PROXY
     try {
       const host = url.hostname;
@@ -126,6 +122,8 @@ export function createProxyFetch(proxyUrl?: string): typeof fetch {
     const method = init?.method || "GET";
     const reqHeaders = headersToRecord(init?.headers);
     const body = init?.body as string | undefined;
+    const isHttps = url.protocol === "https:";
+    const targetPort = url.port || (isHttps ? "443" : "80");
 
     return new Promise((resolve, reject) => {
       // Step 1: Establish CONNECT tunnel through proxy
@@ -133,25 +131,35 @@ export function createProxyFetch(proxyUrl?: string): typeof fetch {
         hostname: proxyHost,
         port: proxyPort,
         method: "CONNECT",
-        path: `${url.hostname}:${url.port || 443}`,
+        path: `${url.hostname}:${targetPort}`,
         headers: {
-          Host: `${url.hostname}:${url.port || 443}`,
+          Host: `${url.hostname}:${targetPort}`,
           "Proxy-Connection": "Keep-Alive",
         },
         timeout: 30000,
       });
 
       proxyReq.on("connect", (_res, socket) => {
-        // Step 2: Upgrade socket to TLS
-        const tlsSocket = tls.connect({
-          socket: socket,
-          host: url.hostname,
-          servername: url.hostname,
-          rejectUnauthorized: false,
-        });
+        let sendSocket: net.Socket;
 
-        tlsSocket.on("secureConnect", () => {
-          // Step 3: Send the actual HTTPS request through the TLS tunnel
+        if (isHttps) {
+          // For HTTPS: upgrade socket to TLS
+          sendSocket = tls.connect({
+            socket: socket as net.Socket,
+            host: url.hostname,
+            servername: url.hostname,
+            rejectUnauthorized: false,
+          });
+          (sendSocket as tls.TLSSocket).on("secureConnect", () => {
+            sendRequest(sendSocket);
+          });
+        } else {
+          // For HTTP: use the raw socket directly (no TLS)
+          sendSocket = socket as net.Socket;
+          sendRequest(sendSocket);
+        }
+
+        function sendRequest(sock: net.Socket) {
           const reqPath = url.pathname + url.search;
 
           // Build request string
@@ -171,8 +179,8 @@ export function createProxyFetch(proxyUrl?: string): typeof fetch {
             reqStr += body;
           }
 
-          tlsSocket.write(reqStr);
-        });
+          sock.write(reqStr);
+        }
 
         // Collect response
         let responseData = "";
@@ -181,7 +189,7 @@ export function createProxyFetch(proxyUrl?: string): typeof fetch {
         let statusText = "";
         let headersParsed = false;
 
-        tlsSocket.on("data", (data) => {
+        sendSocket.on("data", (data: Buffer) => {
           responseData += data.toString();
 
           if (!headersParsed) {
@@ -212,10 +220,9 @@ export function createProxyFetch(proxyUrl?: string): typeof fetch {
           }
         });
 
-        tlsSocket.on("end", () => {
+        sendSocket.on("end", () => {
           // Handle chunked transfer encoding
           let body = responseData;
-          // Check for Transfer-Encoding header (case-insensitive)
           const transferEncoding =
             responseHeaders["transfer-encoding"] ||
             responseHeaders["Transfer-Encoding"] ||
@@ -226,7 +233,6 @@ export function createProxyFetch(proxyUrl?: string): typeof fetch {
             } catch {
               // If chunked decoding fails, use raw data
             }
-            // Remove Transfer-Encoding header since we've decoded the body
             delete responseHeaders["transfer-encoding"];
             delete responseHeaders["Transfer-Encoding"];
           }
@@ -239,8 +245,8 @@ export function createProxyFetch(proxyUrl?: string): typeof fetch {
           resolve(res);
         });
 
-        tlsSocket.on("error", (err) => {
-          reject(new Error(`TLS error: ${err.message}`));
+        sendSocket.on("error", (err) => {
+          reject(new Error(`Socket error: ${err.message}`));
         });
       });
 
@@ -267,10 +273,10 @@ function decodeChunkedBody(data: string): string {
     if (lineEnd === -1) break;
     const chunkSize = parseInt(data.substring(pos, lineEnd), 16);
     if (isNaN(chunkSize)) break;
-    if (chunkSize === 0) break; // final chunk, ignore trailing data
+    if (chunkSize === 0) break;
     pos = lineEnd + 2;
     out.push(data.substring(pos, pos + chunkSize));
-    pos += chunkSize + 2; // skip trailing \r\n
+    pos += chunkSize + 2;
   }
   return out.join("");
 }
