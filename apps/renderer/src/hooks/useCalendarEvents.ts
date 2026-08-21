@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { CalendarEvent, LoadingState } from "../types";
 import {
   fetchCalendarEvents,
@@ -10,7 +10,7 @@ import { useSyncStore } from "../store/syncStore";
 
 // 从环境变量获取默认日期范围
 const DEFAULT_DATE_RANGE_DAYS = parseInt(
-  import.meta.env.VITE_DEFAULT_DATE_RANGE_DAYS || "30"
+  import.meta.env.VITE_DEFAULT_DATE_RANGE_DAYS || "30",
 );
 
 // 缓存过期时间（毫秒）- 1小时
@@ -36,34 +36,37 @@ export function useCalendarEvents(calendarUrl: string | null) {
     setSyncError,
     setCachedEvents,
     clearCache,
-    removeEventFromCache
+    removeEventFromCache,
   } = useSyncStore();
 
   // 检查缓存是否有效
-  const isCacheValid = useCallback((url: string) => {
-    if (!cachedEvents[url] || !cacheTimestamps[url]) return false;
-    const cacheAge = Date.now() - cacheTimestamps[url];
-    return cacheAge < CACHE_EXPIRY_TIME;
-  }, [cachedEvents, cacheTimestamps]);
+  const isCacheValid = useCallback(
+    (url: string) => {
+      if (!cachedEvents[url] || !cacheTimestamps[url]) return false;
+      const cacheAge = Date.now() - cacheTimestamps[url];
+      return cacheAge < CACHE_EXPIRY_TIME;
+    },
+    [cachedEvents, cacheTimestamps],
+  );
 
   // 从缓存或服务器加载事件
   const loadEvents = useCallback(
     async (startDate?: Date, endDate?: Date, forceRefresh = false) => {
-      console.log('loadEvents called with calendarUrl:', calendarUrl);
+      console.log("loadEvents called with calendarUrl:", calendarUrl);
       if (!calendarUrl) {
-        console.log('No calendarUrl, returning early');
+        console.log("No calendarUrl, returning early");
         return;
       }
 
       // 如果有有效的缓存且不强制刷新，直接使用缓存
       if (!forceRefresh && isCacheValid(calendarUrl)) {
-        console.log('Using cached events');
+        console.log("Using cached events");
         setEvents(cachedEvents[calendarUrl]);
         setLoadingState("success");
         return;
       }
 
-      console.log('Setting loading state to loading');
+      console.log("Setting loading state to loading");
       setLoadingState("loading");
       setError(null);
 
@@ -73,24 +76,24 @@ export function useCalendarEvents(calendarUrl: string | null) {
         const end =
           endDate ||
           new Date(
-            start.getTime() + DEFAULT_DATE_RANGE_DAYS * 24 * 60 * 60 * 1000
+            start.getTime() + DEFAULT_DATE_RANGE_DAYS * 24 * 60 * 60 * 1000,
           );
 
-        console.log('Fetching events from API');
+        console.log("Fetching events from API");
         const fetchedEvents = await fetchCalendarEvents(
           calendarUrl,
           start,
-          end
+          end,
         );
-        console.log('Fetched events:', fetchedEvents.length);
+        console.log("Fetched events:", fetchedEvents.length);
 
         // 更新缓存
         setCachedEvents(calendarUrl, fetchedEvents);
         setEvents(fetchedEvents);
-        console.log('Setting loading state to success');
+        console.log("Setting loading state to success");
         setLoadingState("success");
       } catch (err) {
-        console.error('Error fetching events:', err);
+        console.error("Error fetching events:", err);
         const errorMessage =
           err instanceof Error ? err.message : "获取事件失败";
         setError(errorMessage);
@@ -98,13 +101,13 @@ export function useCalendarEvents(calendarUrl: string | null) {
 
         // 如果有缓存，即使获取失败也显示缓存数据
         if (cachedEvents[calendarUrl]) {
-          console.log('Using cached events due to error');
+          console.log("Using cached events due to error");
           setEvents(cachedEvents[calendarUrl]);
           setLoadingState("success");
         }
       }
     },
-    [calendarUrl, cachedEvents, isCacheValid, setCachedEvents]
+    [calendarUrl, cachedEvents, isCacheValid, setCachedEvents],
   );
 
   // 执行同步操作
@@ -116,7 +119,17 @@ export function useCalendarEvents(calendarUrl: string | null) {
     setSyncError(null);
 
     try {
-      // 强制从服务器加载最新数据
+      // 先尝试使用缓存，如果缓存有效就不强制刷新
+      if (isCacheValid(calendarUrl)) {
+        console.log("Sync: cache is valid, using cached events");
+        setEvents(cachedEvents[calendarUrl]);
+        setLastSyncTime(Date.now());
+        setSyncStatus("success");
+        setIsSyncing(false);
+        return;
+      }
+
+      // 缓存无效时才强制从服务器加载最新数据
       await loadEvents(undefined, undefined, true);
       setLastSyncTime(Date.now());
       setSyncStatus("success");
@@ -127,7 +140,17 @@ export function useCalendarEvents(calendarUrl: string | null) {
     } finally {
       setIsSyncing(false);
     }
-  }, [calendarUrl, isSyncing, loadEvents, setIsSyncing, setSyncStatus, setSyncError, setLastSyncTime]);
+  }, [
+    calendarUrl,
+    isSyncing,
+    loadEvents,
+    isCacheValid,
+    cachedEvents,
+    setIsSyncing,
+    setSyncStatus,
+    setSyncError,
+    setLastSyncTime,
+  ]);
 
   // 创建事件
   const createEvent = useCallback(
@@ -145,7 +168,7 @@ export function useCalendarEvents(calendarUrl: string | null) {
         throw new Error(errorMessage);
       }
     },
-    [calendarUrl, clearCache, performSync]
+    [calendarUrl, clearCache, performSync],
   );
 
   // 更新事件
@@ -164,7 +187,7 @@ export function useCalendarEvents(calendarUrl: string | null) {
         throw new Error(errorMessage);
       }
     },
-    [calendarUrl, clearCache, performSync]
+    [calendarUrl, clearCache, performSync],
   );
 
   // 删除事件
@@ -184,7 +207,7 @@ export function useCalendarEvents(calendarUrl: string | null) {
         throw new Error(errorMessage);
       }
     },
-    [calendarUrl, removeEventFromCache, performSync]
+    [calendarUrl, removeEventFromCache, performSync],
   );
 
   // 强制同步
@@ -193,28 +216,31 @@ export function useCalendarEvents(calendarUrl: string | null) {
   }, [performSync]);
 
   // 初始化同步（带重试机制）
-  const initSync = useCallback(async (retryCount = 3) => {
-    for (let i = 0; i < retryCount; i++) {
-      try {
-        await performSync();
-        return true;
-      } catch (err) {
-        console.warn(`Initialization sync attempt ${i + 1} failed:`, err);
-        if (i < retryCount - 1) {
-          // 等待一段时间后重试
-          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+  const initSync = useCallback(
+    async (retryCount = 3) => {
+      for (let i = 0; i < retryCount; i++) {
+        try {
+          await performSync();
+          return true;
+        } catch (err) {
+          console.warn(`Initialization sync attempt ${i + 1} failed:`, err);
+          if (i < retryCount - 1) {
+            // 等待一段时间后重试
+            await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+          }
         }
       }
-    }
-    return false;
-  }, [performSync]);
+      return false;
+    },
+    [performSync],
+  );
 
   // 初始化加载
   useEffect(() => {
     if (calendarUrl) {
       // 使用带重试机制的初始化同步
-      initSync().catch(err => {
-        console.error('Initial sync failed:', err);
+      initSync().catch((err) => {
+        console.error("Initial sync failed:", err);
         // 即使初始化同步失败，也要加载缓存中的数据（如果有）
         loadEvents();
       });
@@ -232,9 +258,13 @@ export function useCalendarEvents(calendarUrl: string | null) {
     return () => clearInterval(intervalId);
   }, [calendarUrl, syncInterval, performSync]);
 
-  // 响应外部强制同步请求
+  // 响应外部强制同步请求 - 当 lastSyncTime 发生变化时触发同步
+  // 使用 ref 追踪上一次的 lastSyncTime，避免初始 null → Date.now() 时触发不必要同步
+  const lastSyncTimeRef = useRef(lastSyncTime);
+
   useEffect(() => {
-    if (lastSyncTime === 0) {
+    if (lastSyncTime !== null && lastSyncTime !== lastSyncTimeRef.current) {
+      lastSyncTimeRef.current = lastSyncTime;
       performSync();
     }
   }, [lastSyncTime, performSync]);

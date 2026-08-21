@@ -60,6 +60,10 @@ export async function fetchCalendarEvents(
     end: event.end?.dateTime || event.end?.date,
     allDay: !event.start?.dateTime,
     description: event.description?.trim(),
+    category: event.category,
+    tags: event.tags,
+    priority: event.priority,
+    recurrence: event.recurrence,
   }));
 }
 
@@ -74,6 +78,7 @@ type EventInputData =
       description?: string;
       category?: unknown;
       tags?: unknown[];
+      priority?: string;
       recurrence?: unknown;
     };
 

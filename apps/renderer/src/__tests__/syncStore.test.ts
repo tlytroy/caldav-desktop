@@ -121,8 +121,11 @@ describe("syncStore", () => {
     expect(events).toHaveLength(1);
   });
 
-  it("should force sync by setting lastSyncTime to 0", () => {
+  it("should force sync by updating lastSyncTime to current time", () => {
+    const before = Date.now();
     useSyncStore.getState().forceSync();
-    expect(useSyncStore.getState().lastSyncTime).toBe(0);
+    const after = useSyncStore.getState().lastSyncTime;
+    expect(after).toBeGreaterThanOrEqual(before);
+    expect(after).toBeLessThanOrEqual(Date.now());
   });
 });

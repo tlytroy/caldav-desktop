@@ -1,24 +1,21 @@
 import { SyncStatusBar } from '../../components/ui/SyncStatusBar';
+import { useSyncStore } from '../../store/syncStore';
 
 interface SyncWorkspaceProps {
   onManualSync: () => void;
-  isSyncing: boolean;
-  syncStatus: 'idle' | 'syncing' | 'error';
-  lastSyncTime: number;
 }
 
 export function SyncWorkspace({
   onManualSync,
-  isSyncing,
-  syncStatus,
-  lastSyncTime,
 }: SyncWorkspaceProps) {
+  const { isSyncing, syncStatus, lastSyncTime } = useSyncStore();
+
   return (
     <SyncStatusBar
       onManualSync={onManualSync}
       isSyncing={isSyncing}
-      syncStatus={syncStatus}
-      lastSyncTime={lastSyncTime}
+      syncStatus={syncStatus as 'idle' | 'syncing' | 'error'}
+      lastSyncTime={lastSyncTime ?? undefined}
     />
   );
 }

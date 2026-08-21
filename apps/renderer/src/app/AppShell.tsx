@@ -7,7 +7,6 @@ import { GlobalErrorBoundary } from '../components/ui/ErrorBoundary';
 import Calendar from '../components/Calendar';
 import { CalendarSelector } from '../features/calendar/CalendarSelector';
 import { CalendarWorkspace } from '../features/calendar/CalendarWorkspace';
-import { FeatureRoadmap } from '../features/roadmap/FeatureRoadmap';
 import { SyncWorkspace } from '../features/sync/SyncWorkspace';
 import type { CalDAVConfig, EventFilter, TestConnectionResult } from '../types';
 
@@ -16,7 +15,6 @@ interface AppShellProps {
   selectedCalendarUrl: string | null;
   config: CalDAVConfig;
   isConfigModalOpen: boolean;
-  selectedCalendarTitle?: string;
   isSettingsModalOpen: boolean;
   setSelectedCalendarUrl: (url: string | null) => void;
   setIsConfigModalOpen: (open: boolean) => void;
@@ -30,7 +28,6 @@ interface AppShellProps {
   configLoading: boolean;
   testResult: TestConnectionResult | null;
   refreshCalendars: () => Promise<void>;
-  manualSync: boolean;
 }
 
 export function AppShell({
@@ -50,7 +47,6 @@ export function AppShell({
   onManualSync,
   configLoading,
   testResult,
-  manualSync,
 }: AppShellProps) {
   return (
     <GlobalErrorBoundary>
@@ -78,8 +74,6 @@ export function AppShell({
           onSelect={setSelectedCalendarUrl}
         />
 
-        <FeatureRoadmap />
-
         {selectedCalendarUrl && <FilterBar onFilterChange={onFilterChange} />}
 
         <div className="mt-8 max-w-7xl mx-auto">
@@ -93,9 +87,6 @@ export function AppShell({
         {selectedCalendarUrl && (
           <SyncWorkspace
             onManualSync={onManualSync}
-            isSyncing={manualSync}
-            syncStatus={manualSync ? 'syncing' : 'idle'}
-            lastSyncTime={Date.now()}
           />
         )}
 

@@ -305,7 +305,9 @@ calendarRouter.get("/events", async (req, res) => {
       const propXmlText = await propResp.text();
 
       // 提取所有 .ics 文件的 href
-      const hrefRegex = /<d:href>([^<]+\.ics)<\/d:href>/g;
+      // 兼容多种 namespace 格式：<d:href>、<D:href>、<href>（Radicale 默认 namespace）
+      const hrefRegex =
+        /<(?:[a-zA-Z]*:)?href>([^<]+\.ics)<\/(?:[a-zA-Z]*:)?href>/g;
       let hrefMatch;
 
       while ((hrefMatch = hrefRegex.exec(propXmlText)) !== null) {

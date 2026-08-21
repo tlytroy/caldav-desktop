@@ -49,6 +49,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
   });
 
   // 首次加载时执行初始化同步，但不要阻塞UI显示
+  // 注意：只依赖 calendarUrl，避免因 initSync/setLoadingState 引用变化导致的无限循环
   useEffect(() => {
     if (calendarUrl) {
       // 立即显示日历框架，事件数据在后台加载
@@ -60,7 +61,8 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
         // 后台同步失败不影响UI显示
       });
     }
-  }, [calendarUrl, initSync, setLoadingState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendarUrl]);
 
   // 过滤事件
   const filteredEvents = useMemo(() => {
@@ -113,7 +115,7 @@ export default function Calendar({ calendarUrl }: CalendarProps) {
   };
 
   const handleEventClick = (info: any) => {
-    const event = events.find(e => e.id === info.event.id);
+    const event = filteredEvents.find(e => e.id === info.event.id);
     if (event) {
       setFormData({
         id: event.id,

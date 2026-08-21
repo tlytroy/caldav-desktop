@@ -43,10 +43,14 @@ export const useSyncStore = create<SyncState>()(
       setIsSyncing: (syncing) => set({ isSyncing: syncing }),
       setSyncStatus: (status) => set({ syncStatus: status }),
       setSyncError: (error) => set({ syncError: error }),
-      setCachedEvents: (calendarUrl, events) => set((state) => ({
-        cachedEvents: { ...state.cachedEvents, [calendarUrl]: events },
-        cacheTimestamps: { ...state.cacheTimestamps, [calendarUrl]: Date.now() }
-      })),
+      setCachedEvents: (calendarUrl, events) =>
+        set((state) => ({
+          cachedEvents: { ...state.cachedEvents, [calendarUrl]: events },
+          cacheTimestamps: {
+            ...state.cacheTimestamps,
+            [calendarUrl]: Date.now(),
+          },
+        })),
       clearCache: (calendarUrl) => {
         if (calendarUrl) {
           set((state) => {
@@ -56,7 +60,7 @@ export const useSyncStore = create<SyncState>()(
             delete newCacheTimestamps[calendarUrl];
             return {
               cachedEvents: newCachedEvents,
-              cacheTimestamps: newCacheTimestamps
+              cacheTimestamps: newCacheTimestamps,
             };
           });
         } else {
@@ -70,29 +74,29 @@ export const useSyncStore = create<SyncState>()(
           if (!state.cachedEvents[calendarUrl]) return state;
 
           const updatedEvents = state.cachedEvents[calendarUrl].filter(
-            (event: any) => event.uid !== eventId
+            (event: any) => event.uid !== eventId,
           );
 
           return {
             cachedEvents: {
               ...state.cachedEvents,
-              [calendarUrl]: updatedEvents
-            }
+              [calendarUrl]: updatedEvents,
+            },
           };
         });
       },
       forceSync: () => {
-        // 触发强制同步的标志
-        set({ lastSyncTime: 0 });
-      }
+        // 触发强制同步的标志 - 使用 Date.now() 确保每次值不同，从而触发 React 重新渲染
+        set({ lastSyncTime: Date.now() });
+      },
     }),
     {
       name: "sync-storage", // 存储在localStorage中的key
       partialize: (state) => ({
         syncInterval: state.syncInterval,
         cachedEvents: state.cachedEvents,
-        cacheTimestamps: state.cacheTimestamps
-      })
-    }
-  )
+        cacheTimestamps: state.cacheTimestamps,
+      }),
+    },
+  ),
 );

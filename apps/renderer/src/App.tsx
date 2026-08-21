@@ -4,7 +4,9 @@ import { useRegisterModules } from "./modules/useRegisterModules";
 import { AppShell } from "./app/AppShell";
 import { useCalendars } from "./hooks/useCalendars";
 import { useCalendarStore } from "./store/calendarStore";
+
 import { testConnection, saveConfig } from "./api/calendar";
+import { useSyncStore } from "./store/syncStore";
 import type { CalDAVConfig, TestConnectionResult } from "./types";
 
 /**
@@ -40,8 +42,6 @@ export default function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = React.useState(false);
   const [testResult, setTestResult] = React.useState<TestConnectionResult | null>(null);
   const [configLoading, setConfigLoading] = React.useState(false);
-  const [manualSync, setManualSync] = React.useState(false);
-
   const handleTestConnection = async () => {
     setConfigLoading(true);
     setTestResult(null);
@@ -57,6 +57,13 @@ export default function App() {
     } finally {
       setConfigLoading(false);
     }
+  };
+
+  // 处理手动同步，通过 syncStore 触发 useCalendarEvents 中的同步
+  const handleManualSync = () => {
+    // 通过 syncStore 触发强制同步
+    // useCalendarEvents 中的 effect 会监听到 lastSyncTime 变化并执行 performSync
+    useSyncStore.getState().forceSync();
   };
 
   const handleSaveConfig = async () => {
@@ -107,10 +114,9 @@ export default function App() {
       onTestConnection={handleTestConnection}
       onSaveConfig={handleSaveConfig}
       onSetConfig={(partial) => setConfig(partial)}
-      onManualSync={() => setManualSync(true)}
+      onManualSync={handleManualSync}
       configLoading={configLoading}
       testResult={testResult}
-      manualSync={manualSync}
       refreshCalendars={refreshCalendars}
     />
   );
