@@ -203,8 +203,15 @@ UI：日历页工具栏「WebDAV」按钮 → 同步面板（文件状态列表�
 - WebDAV 通道**检测到冲突只提示，不做自动三方合并**，需用户选一边
 - 增量同步未实现：目前按全量 events 遍历，未做 `updated` 级增量
 - CalDAV 通道的冲突检测仅为基于 `updated` 的基础版（WebDAV 通道用 ETag 较可靠）
-- AI 通道未实现（`.env` 中的 `AI_*` 是预留变量，无代码读取）
 - localStorage 缓存层形同虚设，可考虑移除或重新接线
+- 各 WebDAV 服务商对 `PROPFIND` / `MKCOL` / `If-Match` 支持程度有差异，
+  首次接入建议先用「测试连接」确认
+
+## 相关功能
+
+- **自然语言快速创建**（`/api/nlp/*`）：本地中文规则解析作快速路径，
+  AI 作增强通道。详见 `docs/UPDATE_LOG.md` 与 `.env` 注释
+- **iCalendar 导入导出**（`/api/md-bridge/ics/*`）
 
 ---
 

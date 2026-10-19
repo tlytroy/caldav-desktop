@@ -21,7 +21,9 @@ cd apps/server && pnpm test
 cd apps/server && pnpm vitest run \
   src/__tests__/ics-file.test.ts \
   src/__tests__/kanban-id.test.ts \
-  src/__tests__/webdav-sync.test.ts
+  src/__tests__/webdav-sync.test.ts \
+  src/__tests__/zh-time.test.ts \
+  src/__tests__/nlp-parse.test.ts
 ```
 
 ### Manual Frontend Tests
@@ -92,7 +94,43 @@ cd apps/renderer && pnpm dev    # Terminal 2 (port 5173)
 | pull force 强制覆盖 | — |
 | 连接测试正常路径 / 认证失败 | 401 要给出明确提示 |
 
-**当前状态：40 项全部通过（2026-10-19 验证）。**
+**当前状态：121 项全部通过（2026-10-19 验证）。**
+
+### `src/__tests__/zh-time.test.ts` — 中文时间解析（63 项）
+
+| 用例组 | 锁定的问题 |
+| ------ | ---------- |
+| 中文数字转换 | 十/十五/二十三/三十五、两=2 |
+| 时长解析 | 2小时/半小时/一个半小时/45分钟 |
+| 相对日期 | 明天/后天/大后天/今天（已过则顺延）/昨天 |
+| 星期 | **下周三、下下周一、周四、周一（已过→下周一）**、周日、这周末 |
+| 绝对日期 | 3月5日（已过→明年）/12月20日/2026-11-05/11-8 |
+| 时间与时段 | 下午3点→15:00/晚上8点→20:00/2点半/15:30/只有时段→默认 |
+| 相对时间 | 半小时后/2小时后/45分钟后/三天后 |
+| 时长推导结束 | 持续2小时/一个半小时/无时长默认1小时 |
+| 重复规则 | 每天/每周三/每月5号/每年 |
+| 标题提取 | 剔除时间描述保留核心、保留「和」等中文用词 |
+| 异常输入 | 非法日期/非法时间/空串/纯符号不崩溃且不产生 Invalid Date |
+
+关键回归点（都是实测踩过的坑）：
+- **周日=0 与周一开头的周混用会整体错位一天**
+- `Date.setHours(now.getHours() + 0.5)` 对小数会截断（20.5 → 20），
+  「半小时后」必须换算成分钟
+- 「今天」本身不是完整日期，不能当成全天事件
+- 「每月5号」这种"N 号"表达需要单独识别，否则整句解析失败
+
+### `src/__tests__/nlp-parse.test.ts` — 自然语言解析 API（18 项）
+
+用 Node `http` 模拟 OpenAI 兼容服务，不需要真实 API Key。
+
+| 用例组 | 锁定的问题 |
+| ------ | ---------- |
+| 本地规则优先 | **能本地解析时完全不发 AI 请求**（断言 requestCount === 0） |
+| AI 兜底 | 本地解析不了长句时调用 AI；forceAI 可强制 |
+| AI 返回格式兼容 | tool_calls / json_object / ```json 代码块 三种都能解析 |
+| 降级与容错 | AI 401 → 降级回本地并附 `fallbackReason`；AI 返回乱码 → 降级；AI 说不是事件 → 422 |
+| 参数校验 | 空文本/缺字段/超长文本 400 |
+| **状态接口不泄露密钥** | `/api/nlp/status` 响应体不含 API Key |
 
 ---
 
@@ -119,6 +157,8 @@ cd apps/renderer && pnpm dev    # Terminal 2 (port 5173)
 | `ics-file.test.ts` | 14/14 通过 |
 | `kanban-id.test.ts` | 9/9 通过 |
 | `webdav-sync.test.ts` | 17/17 通过 |
+| `zh-time.test.ts` | 63/63 通过 |
+| `nlp-parse.test.ts` | 18/18 通过 |
 | ICS 导入导出 HTTP 端到端（含去重、replace、下载头、日期过滤、异常输入） | 25/25 通过 |
 | WebDAV 同步端到端（模拟服务端，52 项含逐条细分断言） | 52/52 通过 |
 | 看板 id 漂移专项（未提交的一次性脚本） | 20/20 通过 |

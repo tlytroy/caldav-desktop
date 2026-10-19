@@ -6,6 +6,7 @@ import { calendarRouter } from "./routes/calendar.js";
 import { mdBridgeRouter } from "./routes/md-bridge.js";
 import { kanbanRouter } from "./routes/kanban.js";
 import { webdavRouter } from "./routes/webdav.js";
+import { nlpRouter } from "./routes/nlp.js";
 import { loadBridgeConfig } from "./md-ics-bridge.js";
 
 const app = express();
@@ -31,6 +32,9 @@ app.use("/api/kanban", kanbanRouter);
 // WebDAV 同步 routes（直接同步 md 文件，无需 ICS 转换）
 app.use("/api/webdav", webdavRouter);
 
+// 自然语言快速创建 routes（本地规则 + 可选 AI 增强）
+app.use("/api/nlp", nlpRouter);
+
 async function start() {
   // CalDAV 连接失败**不应阻止服务启动**。
   //
@@ -52,6 +56,7 @@ async function start() {
     console.log(`🗂  MD bridge:   http://localhost:${PORT}/api/md-bridge/events`);
     console.log(`📋 Kanban:      http://localhost:${PORT}/api/kanban`);
     console.log(`☁️  WebDAV:      http://localhost:${PORT}/api/webdav/status`);
+    console.log(`✨ Quick create: http://localhost:${PORT}/api/nlp/status`);
   });
 }
 

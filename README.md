@@ -15,6 +15,15 @@ Built with the help of AI assistance, this project addresses the lack of standal
   - Manual sync button for immediate updates
   - Sync status visualization in bottom status bar
   - Immediate frontend feedback with background synchronization
+- **自然语言快速创建**（类 Fantastical 交互）:
+  - 日历页顶部一句话创建：「明天下午3点和老王开项目评审会」
+  - **本地中文规则解析作快速路径** —— 毫秒级、断网可用、零调用费用
+  - 覆盖：今天/明天/后天、下周三/下下周一、这周末、3月5日、
+    下午3点/晚上8点/2点半、半小时后/2小时后、每天/每周一、持续2小时
+  - 可选接入 OpenAI 格式 AI 作为**增强通道**：处理规则覆盖不到的复杂长句
+  - **草稿先预览再建**：解析不直接写文件，确认后才落盘 events.md
+  - **语音创建**：浏览器内置语音识别（免费、音频不出本机），
+    不支持时可回退到 Whisper API
 - **iCalendar 文件导入 / 导出**:
   - 导入任意 `.ics`（Google / Outlook / Apple 导出）到 events.md，支持先预览再确认
   - 按 uid 去重，重复导入不会产生重复事件
@@ -96,6 +105,19 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md   # 只取目录部分
 
 配好后日历页工具栏会出现「WebDAV」按钮，可推送 / 拉取 / 测试连接。
 详见 [docs/SYNC_MANAGEMENT.md](docs/SYNC_MANAGEMENT.md)。
+
+### AI 解析配置（可选）
+
+自然语言快速创建的**增强通道**。不配也能用（本地规则解析始终可用）：
+
+```
+AI_BASE_URL=https://api.deepseek.com/v1    # 任意 OpenAI 兼容端点
+AI_API_KEY=sk-xxx
+AI_MODEL=deepseek-chat
+```
+
+AI 主要用于两处：① 规则解析不了的长句兜底；② 语音转写（Whisper）。
+**API Key 只由服务端读取，绝不下发到浏览器。**
 
 ## 🔗 工作台集成（events.md 单一事实源）
 
@@ -346,14 +368,16 @@ radicale-desktop/
   - [x] 级联删除 / 解绑保留
   - [x] `X-KANBAN-TASK-ID` 扩展属性保证同步往返不丢关联
 - **Phase 6: 占位模块**
-  - [ ] git-sync 占位模块（模块已注册，路由到通用占位页）
-  - [ ] ai-agent 占位模块（`.env` 里 `AI_*` 全是死配置，无代码读取）
-  - [ ] notifications 占位模块
+  - [x] git-sync / ai-agent / notifications 三模块已注册（status=placeholder）
+  - [x] 自然语言快速创建（本地规则 + AI 兜底 + 语音输入）
+  - [ ] git-sync 实际功能（WebDAV 通道已独立实现，此占位模块可考虑下线或改为 Git 备份）
+  - [ ] ai-agent 模块的实际能力（自动从笔记提取事件）
+  - [ ] notifications 通知推送
 
 ### v0.3.0+ (规划中)
 
-- 自然语言快速创建事件（类 Fantastical 交互）
-- AI 从笔记提取事件
+- ~~自然语言快速创建事件（类 Fantastical 交互）~~ ✅ 已于 2026-10-19 实现
+- AI 从笔记批量提取事件
 - 多 CalDAV 账号支持
 - 离线模式增强
 - Android 端适配（**架构前提**：md 读写与同步核心需下沉到渲染层或改用 Capacitor 插件，因为移动端没有 Node 后端）

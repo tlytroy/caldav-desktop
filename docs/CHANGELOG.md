@@ -36,6 +36,21 @@ All notable changes to CalDAV Desktop are documented here.
 
 ### ✨ New Features
 
+- **自然语言快速创建（类 Fantastical 交互）**
+  - 日历页顶部一句话创建：「明天下午3点和老王开项目评审会」
+  - **本地中文规则解析作快速路径** —— 毫秒级、断网可用、零调用费用。
+    不用 AI 主导的理由：AI 有网络延迟（削弱"快速"的本质）、
+    断网即不可用、且会「自信地」算错日期（比不识别更危险）
+  - 覆盖：相对日、星期（含下周三/下下周一）、这周末、月底月初、
+    绝对日期、时段（下午3点/晚上8点/2点半）、相对时间（半小时后）、
+    时长（持续2小时）、重复（每天/每周一/每月5号）
+  - 可选接入 OpenAI 格式 AI 作**增强通道**，处理规则覆盖不到的复杂长句；
+    三级降级：tool calling → json mode → 裸 JSON，AI 挂了自动回退本地
+  - **草稿先预览再建**：解析端点不写文件，用户确认后才落盘 events.md
+  - **语音创建**：浏览器 Web Speech API（免费、音频不出本机）优先，
+    不支持时回退 Whisper API
+  - **API Key 只由服务端读取**，`/api/nlp/status` 只回传"配没配"
+
 - **WebDAV 同步通道（直接同步 md，无需 ICS 转换）**
   - 把 `events.md` 与 `工作搭子看板.md` 原样同步到 WebDAV 云盘
     （Nextcloud / 坚果云 / ownCloud / Box），适用于没有 CalDAV 的用户

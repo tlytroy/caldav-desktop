@@ -24,7 +24,7 @@ import {
  * 双向绑定：createEvent 第二参数 kanban 可让后端同时在 工作搭子看板 创建任务并互填链接；
  * deleteEvent 第二参数 cascade=true 表示删除事件时联动删除绑定的看板任务。
  */
-export function useCalendarEvents(_calendarUrl?: string | null) {
+export function useCalendarEvents(_calendarUrl?: string | null, refreshKey?: number) {
   const [events, setEvents] = useState<MdEvent[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +49,13 @@ export function useCalendarEvents(_calendarUrl?: string | null) {
   useEffect(() => {
     loadEvents();
   }, [loadEvents]);
+
+  // 外部数据变更（如自然语言快速创建写盘）后重读 events.md
+  useEffect(() => {
+    if (refreshKey !== undefined && refreshKey > 0) {
+      loadEvents();
+    }
+  }, [refreshKey, loadEvents]);
 
   /**
    * 创建事件：写 events.md，UI 立即刷新。

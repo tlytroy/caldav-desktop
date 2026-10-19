@@ -50,6 +50,8 @@ const MD_PRIORITY_COLOR: Record<'high' | 'medium' | 'low', string> = {
 interface CalendarProps {
   calendarUrl?: string;
   externalEvents?: any[];
+  /** 外部数据变更时自增，触发重读 events.md（用于快速创建后刷新） */
+  refreshKey?: number;
 }
 
 /**
@@ -73,7 +75,7 @@ function toFullCalendarEvent(e: MdEvent) {
   };
 }
 
-export default function Calendar({ calendarUrl, externalEvents }: CalendarProps) {
+export default function Calendar({ calendarUrl, externalEvents, refreshKey }: CalendarProps) {
   const {
     events,
     loadingState,
@@ -86,7 +88,7 @@ export default function Calendar({ calendarUrl, externalEvents }: CalendarProps)
     pullFromCaldav,
     bidirectionalSync,
     lastSyncTime,
-  } = useCalendarEvents(calendarUrl || null);
+  } = useCalendarEvents(calendarUrl || null, refreshKey);
   const { eventFilter, categories, tags } = useCalendarStore();
   const { borderRadius } = useThemeStore();
   const [showModal, setShowModal] = useState(false);
