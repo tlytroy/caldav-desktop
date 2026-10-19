@@ -20,6 +20,12 @@ Built with the help of AI assistance, this project addresses the lack of standal
   - 按 uid 去重，重复导入不会产生重复事件
   - 可选择追加（append）或替换（replace）两种模式
   - 导出 events.md 为单个 `.ics` 文件，可按日期范围过滤
+- **WebDAV 同步（直接同步 md，无需 ICS 转换）**:
+  - 把 `events.md` 与 `工作搭子看板.md` 原样同步到 WebDAV 服务器（Nextcloud / 坚果云 / ownCloud / Box）
+  - 适用于**没有 CalDAV 服务器**的场景：只要有 WebDAV 云盘即可多设备同步
+  - ETag 乐观锁：检测到远端被其他设备修改时不静默覆盖，交由用户决策
+  - 拉取只覆盖「远端确实变化」的文件，覆盖前自动备份为 `.bak`
+  - 冲突时提供「用本地覆盖」/「改用远端」两个明确选项
 - **Event Management**: Create, edit, delete events with full CRUD operations
   - Enhanced delete functionality with robust error handling
   - Graceful handling of network issues and server errors
@@ -76,6 +82,20 @@ MD_ICS_SYNC_DIRECTION=bidirectional   # push | pull | bidirectional
 MD_ICS_AUTO_SYNC_MINUTES=0             # >0 启用延时自动同步（非实时）
 KANBAN_FILE_PATH=./工作搭子看板.md      # 工作台任务看板文件路径
 ```
+
+### WebDAV 同步配置（可选）
+
+不装 CalDAV 也能多设备同步 —— 直接把 md 文件传到 WebDAV 云盘：
+
+```
+WEBDAV_URL=https://dav.example.com/remote.php/dav/files/user
+WEBDAV_USER=your_username
+WEBDAV_PASS=your_password
+WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md   # 只取目录部分
+```
+
+配好后日历页工具栏会出现「WebDAV」按钮，可推送 / 拉取 / 测试连接。
+详见 [docs/SYNC_MANAGEMENT.md](docs/SYNC_MANAGEMENT.md)。
 
 ## 🔗 工作台集成（events.md 单一事实源）
 
@@ -313,7 +333,7 @@ radicale-desktop/
   - [x] 工作搭子看板.md 读写（待办 / 项目 / 速记）
   - [x] iCalendar 文件导入（多事件、dryRun 预览、按 uid 去重）
   - [x] iCalendar 文件导出（单文件 VCALENDAR、可按日期范围过滤）
-  - [ ] WebDAV 通道（`.env` 里已预留 `WEBDAV_*` 变量，**代码尚未实现**）
+  - [x] WebDAV 通道（直接同步双 md 文件，ETag 冲突检测 + 自动备份）
 - **Phase 4: CalDAV 同步**
   - [x] MD → ICS 转换
   - [x] push / pull / 双向同步，pull 保留本地 `kanbanTaskId`

@@ -2,7 +2,83 @@
 
 这个文件记录了项目的持续更新和改进。每次更新都应该在这个文件中添加相关信息，而不是创建新的更新日志文件。
 
-## 2026-10-19
+## 2026-10-19（下午）
+
+### 实现 WebDAV 同步通道
+
+上一轮审查中发现 `.env` 里 `WEBDAV_*` 是一组死配置（无任何代码读取），
+而 WebDAV 同步正是产品意图里的第二条同步通道。���次补齐。
+
+**服务端 `apps/server/src/webdav.ts`**
+
+- 只用 Node 内置 fetch，不引第三方 WebDAV 库 —— 坚果云等服务商对第三方库
+  兼容性参差，直接用 `PROPFIND` / `MKCOL` / `PUT` + Basic 认证最稳
+- 远端目录不存在时递归 `MKCOL` 创建
+- `statRemoteFile()` 用 HEAD 查 ETag / 修改时间，不支持 HEAD 时降级用 GET
+  （部分服务端不实现 HEAD）
+- 同步状态记于本地 `.webdav-state.json`（各文件上次同步时的远端 ETag）
+
+**服务端 `apps/server/src/routes/webdav.ts`**
+
+| 接口 | 说明 |
+| ---- | ---- |
+| `GET /api/webdav/status` | 配置 + 双文件本地/远端状态 + 上次同步时间 + 远端是否变更 |
+| `POST /api/webdav/push` | 推送；`files` 限定范围、`force` 强制覆盖 |
+| `POST /api/webdav/pull` | 拉取；`force` 强制拉取 |
+| `POST /api/webdav/test` | 连通性 + 认证测试 |
+
+同步 `events.md` 与 `工作搭子看板.md` 两个文件。
+
+**数据安全设计（这是这个通道最需要小心的部分）**
+
+- **ETag 乐观锁**：push 时比较本地记录的 ETag 与远端当前 ETag。
+  不一致说明远端被其他设备改过，此时返回 `conflict` 而**不覆盖**，
+  由用户在 UI 上选「用本地覆盖远端」或「改用远端内容」。
+  测试用例专门锁定了「远端被改后本地不能覆盖上去」。
+- **拉取保护**：默认只在远端 ETag 变化时才覆盖本地，
+  避免无意义冲掉未同步的本地修改。
+- **自动备份**：拉取覆盖前把本地复制为 `.bak`。
+
+**顺带修的启动容错问题**
+
+`apps/server/src/index.ts` 里 `start()` 在 `initializeClient()` 失败时
+`process.exit(1)`。而 `initializeClient()` 内部已经捕获错误返回空数组，
+所以这层 exit 是多余的 —— 它会导致「没有 CalDAV、只想用 md + WebDAV」
+的用户**完全无法启动服务**。已改为警告后继续启动。
+
+**前端**
+
+- `api/webdav.ts`：status / test / push / pull 客户端
+- 日历页工具栏新增「WebDAV」按钮 → 同步面板：
+  连接信息与测试按钮、双文件状态列表（已同步 / 远端已变更 / 远端缺失）、
+  推送拉取按钮、冲突时二选一决策、逐文件结果明细
+- 拉取覆盖 events.md 后自动 `loadEvents()` 重读
+
+**测试**
+
+新增 `apps/server/src/__tests__/webdav-sync.test.ts`（17 项），
+用 Node http 模拟最小 WebDAV 服务端，不需要真实云盘。
+另跑了 52 项的一次性端到端脚本（含逐条细分断言）。
+全套离线测试现为 **40 项全部通过**。
+
+**文档**
+
+- README：Features 增 WebDAV 条目，补配置说明段，Roadmap Phase 3 勾上
+- `REF/MD_ICS_BRIDGE.md`：WebDAV 阶段从「未实现」改为已实现，
+  补 WebDAV API 表、第 6 条已知陷阱（本地 md 路径解析要统一）
+- `docs/SYNC_MANAGEMENT.md`：新增 WebDAV 章节与「独立可用性」说明
+- `docs/TESTING.md`：补 WebDAV 测试表与「真实 WebDAV 未验证」提示
+- `docs/CHANGELOG.md`：补条目
+
+**已知遗留**
+
+- WebDAV 检测到冲突只提示，**不做自动三方合并**，需用户选一边
+- 各服务商对 `PROPFIND` / `MKCOL` / `If-Match` 支持程度可能有差异，
+  首次接入真实云盘建议先用「测试连接」确认
+- AI 通道（`AI_*`）仍是死配置
+- CalDAV 通道删除事件不同步到远端（缺墓碑）
+
+## 2026-10-19（上午）
 
 ### 全面审查：修复阻塞级 bug + 新增 iCalendar 导入导出
 

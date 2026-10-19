@@ -36,12 +36,29 @@ All notable changes to CalDAV Desktop are documented here.
 
 ### ✨ New Features
 
+- **WebDAV 同步通道（直接同步 md，无需 ICS 转换）**
+  - 把 `events.md` 与 `工作搭子看板.md` 原样同步到 WebDAV 云盘
+    （Nextcloud / 坚果云 / ownCloud / Box），适用于没有 CalDAV 的用户
+  - ETag 乐观锁：远端被其他设备改动时返回冲突而非静默覆盖，
+    UI 提供「用本地覆盖」/「改用远端」两个明确选项
+  - 拉取只覆盖远端确实变化的文件，且覆盖前自动备份为 `.bak`
+  - 同步状态记录于 `.webdav-state.json`
+  - API：`status` / `push` / `pull` / `test`
+  - 日历页工具栏「WebDAV」按钮 + 同步面板
+  - 只用 Node 内置 fetch，不引第三方 WebDAV 库（坚果云兼容性考虑）
+
 - **iCalendar 文件导入 / 导出**
   - `parseIcsFile()`：解析多 VEVENT 文件（此前只取第一条）
   - `eventsFileToIcs()`：导出为单个 VCALENDAR
   - `POST /api/md-bridge/ics/import`：dryRun 预览、按 uid 去重、append/replace
   - `GET /api/md-bridge/ics/export`：日期范围过滤、直接下载
   - 日历页工具栏「导入 ICS」「导出 ICS」+ 预览确认弹窗
+
+### 🐛 服务端启动容错
+
+- 服务端不再因 CalDAV 连接失败而 `process.exit(1)`。
+  `initializeClient()` 内部已捕获错误返回空数组，此前 start() 里额外 exit 会导致
+  「只有 md + WebDAV、没有 CalDAV」的用户完全无法启动。
 
 ### 🧹 Refactor
 

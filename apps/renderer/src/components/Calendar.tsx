@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -19,6 +19,11 @@ import {
   ListTodo,
   Upload,
   Download,
+  HardDrive,
+  HardDriveDownload,
+  HardDriveUpload,
+  AlertTriangle,
+  Check,
 } from 'lucide-react';
 import type { MdEvent } from '../api/md-bridge';
 import {
@@ -26,6 +31,14 @@ import {
   exportIcsDownloadUrl,
   type IcsImportPreview,
 } from '../api/md-bridge';
+import {
+  fetchWebDAVStatus,
+  pushToWebDAV,
+  pullFromWebDAV,
+  testWebDAVConnection,
+  type WebDAVStatus,
+  type WebDAVSyncResult,
+} from '../api/webdav';
 
 /** events.md 里 priority 是 high/medium/low，映射成日历色块 */
 const MD_PRIORITY_COLOR: Record<'high' | 'medium' | 'low', string> = {
@@ -111,6 +124,93 @@ export default function Calendar({ calendarUrl, externalEvents }: CalendarProps)
   const [pendingIcsText, setPendingIcsText] = useState<string | null>(null);
   const [replaceOnImport, setReplaceOnImport] = useState(false);
   const [ioMsg, setIoMsg] = useState<string | null>(null);
+
+  // ===== WebDAV 同步 =====
+  const [webdavOpen, setWebdavOpen] = useState(false);
+  const [webdavStatus, setWebdavStatus] = useState<WebDAVStatus | null>(null);
+  const [webdavBusy, setWebdavBusy] = useState<'push' | 'pull' | 'test' | null>(null);
+  const [webdavResults, setWebdavResults] = useState<WebDAVSyncResult[] | null>(null);
+  const [webdavMsg, setWebdavMsg] = useState<string | null>(null);
+
+  const loadWebdavStatus = async () => {
+    try {
+      const s = await fetchWebDAVStatus();
+      setWebdavStatus(s);
+    } catch (e) {
+      setWebdavMsg('查询 WebDAV 状态失败：' + (e as Error).message);
+    }
+  };
+
+  useEffect(() => {
+    if (webdavOpen) loadWebdavStatus();
+  }, [webdavOpen]);
+
+  /** WebDAV 同步结果 → 可读文案 */
+  const describeSyncResults = (rs: WebDAVSyncResult[]): string => {
+    const ok = rs.filter((r) => r.ok);
+    const conflicts = rs.filter((r) => r.conflict);
+    const skipped = rs.filter((r) => r.skipped);
+    const failed = rs.filter((r) => !r.ok && !r.conflict);
+    const parts: string[] = [];
+    if (ok.length && !skipped.length) parts.push(`${ok.length} 个文件已同步`);
+    if (skipped.length) parts.push(`${skipped.length} 个无变化已跳过`);
+    if (conflicts.length) parts.push(`${conflicts.length} 个存在冲突`);
+    if (failed.length) parts.push(`${failed.length} 个失败`);
+    return parts.join('，') || '无变化';
+  };
+
+  const handleWebdavTest = async () => {
+    setWebdavBusy('test');
+    setWebdavMsg(null);
+    try {
+      const r = await testWebDAVConnection();
+      setWebdavMsg((r.message || (r.success ? '连接成功' : '连接失败')) + (r.remoteDir ? `（远端目录：${r.remoteDir}）` : ''));
+      await loadWebdavStatus();
+    } catch (e) {
+      setWebdavMsg('测试失败：' + (e as Error).message);
+    } finally {
+      setWebdavBusy(null);
+    }
+  };
+
+  const handleWebdavPush = async (force = false) => {
+    setWebdavBusy('push');
+    setWebdavMsg(null);
+    setWebdavResults(null);
+    try {
+      const r = await pushToWebDAV({ force });
+      setWebdavResults(r.results);
+      setWebdavMsg(describeSyncResults(r.results));
+      await loadWebdavStatus();
+    } catch (e) {
+      setWebdavMsg('推送失败：' + (e as Error).message);
+    } finally {
+      setWebdavBusy(null);
+    }
+  };
+
+  const handleWebdavPull = async (force = false) => {
+    setWebdavBusy('pull');
+    setWebdavMsg(null);
+    setWebdavResults(null);
+    try {
+      const r = await pullFromWebDAV({ force });
+      setWebdavResults(r.results);
+      setWebdavMsg(describeSyncResults(r.results));
+      await loadWebdavStatus();
+      // 拉取会覆盖 events.md，必须重读本地数据
+      if (r.results.some((x) => x.key === 'events' && x.ok)) {
+        await loadEvents();
+      }
+    } catch (e) {
+      setWebdavMsg('拉取失败：' + (e as Error).message);
+    } finally {
+      setWebdavBusy(null);
+    }
+  };
+
+  /** 有冲突时先提示，避免用户盲目 force 覆盖 */
+  const hasConflict = webdavResults?.some((r) => r.conflict) ?? false;
 
   // 过滤（事件来自 md-bridge 已经是 MdEvent，但 format 略有差异）
   const filteredEvents = useMemo(() => {
@@ -405,6 +505,14 @@ export default function Calendar({ calendarUrl, externalEvents }: CalendarProps)
             <Download className="w-3.5 h-3.5" />
             导出 ICS
           </button>
+          <button
+            onClick={() => setWebdavOpen(true)}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-700"
+            title="通过 WebDAV 直接同步 md 文件（无需 ICS 转换）"
+          >
+            <HardDrive className="w-3.5 h-3.5" />
+            WebDAV
+          </button>
         </div>
       </div>
 
@@ -521,6 +629,209 @@ export default function Calendar({ calendarUrl, externalEvents }: CalendarProps)
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* WebDAV 同步面板 */}
+      <Modal
+        isOpen={webdavOpen}
+        onClose={() => setWebdavOpen(false)}
+        title="WebDAV 同步"
+        size="md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            直接把 <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800">events.md</code>
+            与 <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800">工作搭子看板.md</code>
+            同步到 WebDAV 服务器（Nextcloud / 坚果云 / ownCloud 等）。
+            <span className="block mt-1">
+              与 CalDAV 通道不同，这里<strong>不经过 ICS 转换</strong>，md 格式原样上传。
+            </span>
+          </p>
+
+          {!webdavStatus ? (
+            <div className="flex items-center justify-center py-6 text-gray-400">
+              <RefreshCw className="w-4 h-4 animate-spin mr-2" /> 查询中…
+            </div>
+          ) : !webdavStatus.configured ? (
+            <div className="p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-sm">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-yellow-500" />
+                <div>
+                  <div className="font-medium text-yellow-700 dark:text-yellow-300">
+                    WebDAV 未配置
+                  </div>
+                  <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                    在项目根目录 <code>.env</code> 中设置：
+                    <pre className="mt-1.5 p-2 rounded bg-white dark:bg-neutral-800 overflow-x-auto">
+{`WEBDAV_URL=https://dav.example.com/remote.php/dav/files/user
+WEBDAV_USER=your_username
+WEBDAV_PASS=your_password
+WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
+                    </pre>
+                    配置后重启后端服务。
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* 连接信息 */}
+              <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-neutral-800 text-xs">
+                <div className="min-w-0">
+                  <div className="font-medium text-gray-700 dark:text-gray-300 truncate">
+                    {webdavStatus.url}
+                  </div>
+                  <div className="text-gray-400 mt-0.5">
+                    远端目录：{webdavStatus.remoteDir || '(根目录)'}
+                    {webdavStatus.hasCredentials ? '' : ' · 未配置账号密码'}
+                  </div>
+                </div>
+                <button
+                  onClick={handleWebdavTest}
+                  disabled={webdavBusy !== null}
+                  className="shrink-0 ml-2 px-2.5 py-1 rounded bg-white dark:bg-neutral-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  {webdavBusy === 'test' ? '测试中…' : '测试连接'}
+                </button>
+              </div>
+
+              {/* 文件状态 */}
+              <ul className="divide-y divide-gray-100 dark:divide-neutral-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                {webdavStatus.files.map((f) => (
+                  <li key={f.key} className="px-3 py-2 flex items-center gap-3 text-sm">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-900 dark:text-white truncate">
+                        {f.filename}
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {f.lastSyncedAt
+                          ? `上次同步 ${new Date(f.lastSyncedAt).toLocaleString('zh-CN')}`
+                          : '尚未同步过'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 text-xs">
+                      <span
+                        className={`inline-flex items-center gap-1 ${
+                          !f.remote.exists
+                            ? 'text-gray-400'
+                            : f.remoteChangedSinceLastSync
+                              ? 'text-amber-500'
+                              : 'text-green-500'
+                        }`}
+                        title={
+                          !f.remote.exists
+                            ? '远端还没有这个文件'
+                            : f.remoteChangedSinceLastSync
+                              ? '远端已被其他设备修改'
+                              : '与远端一致'
+                        }
+                      >
+                        {f.remote.exists ? <Check className="w-3.5 h-3.5" /> : '—'}
+                        {!f.remote.exists
+                          ? '远端缺失'
+                          : f.remoteChangedSinceLastSync
+                            ? '远端已变更'
+                            : '已同步'}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              {/* 操作 */}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => handleWebdavPush(false)}
+                  disabled={webdavBusy !== null}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-brand rounded-lg hover:opacity-90 disabled:opacity-50"
+                >
+                  <HardDriveUpload className="w-4 h-4" />
+                  {webdavBusy === 'push' ? '推送中…' : '推送到 WebDAV'}
+                </button>
+                <button
+                  onClick={() => handleWebdavPull(false)}
+                  disabled={webdavBusy !== null}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-neutral-800 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+                >
+                  <HardDriveDownload className="w-4 h-4" />
+                  {webdavBusy === 'pull' ? '拉取中…' : '从 WebDAV 拉取'}
+                </button>
+              </div>
+
+              <p className="text-xs text-gray-400">
+                推送用 ETag 做乐观锁：检测到远端被其他设备改过时不会覆盖，需手动确认。
+                拉取只覆盖「远端确实变化」的文件，覆盖前自动备份为 <code>.bak</code>。
+              </p>
+
+              {/* 结果 */}
+              {webdavMsg && (
+                <div
+                  className={`p-2.5 rounded-lg border text-xs ${
+                    hasConflict
+                      ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300'
+                      : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
+                  }`}
+                >
+                  <div>{webdavMsg}</div>
+                  {hasConflict && (
+                    <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-800">
+                      <div className="mb-1.5">
+                        远端有更新。建议先「拉取」查看远端内容，再决定是否覆盖。
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleWebdavPush(true)}
+                          disabled={webdavBusy !== null}
+                          className="px-2.5 py-1 rounded bg-amber-600 text-white hover:opacity-90 disabled:opacity-50"
+                        >
+                          仍然用本地覆盖远端
+                        </button>
+                        <button
+                          onClick={() => handleWebdavPull(false)}
+                          disabled={webdavBusy !== null}
+                          className="px-2.5 py-1 rounded bg-white dark:bg-neutral-800 text-amber-700 dark:text-amber-300 hover:opacity-80 disabled:opacity-50"
+                        >
+                          改用远端内容
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 逐文件结果 */}
+              {webdavResults && webdavResults.length > 0 && (
+                <ul className="text-xs space-y-1">
+                  {webdavResults.map((r) => (
+                    <li key={r.key} className="flex items-start gap-2">
+                      <span
+                        className={
+                          r.ok && !r.conflict
+                            ? 'text-green-500'
+                            : r.conflict
+                              ? 'text-amber-500'
+                              : 'text-red-500'
+                        }
+                      >
+                        {r.ok && !r.conflict ? <Check className="w-3.5 h-3.5" /> : '!'}
+                      </span>
+                      <span className="text-gray-600 dark:text-gray-300">
+                        {r.filename}
+                        {r.conflict
+                          ? `：${r.error}`
+                          : r.skipped
+                            ? '：远端无变化，已跳过'
+                            : r.ok
+                              ? `：成功${r.bytes ? `（${r.bytes} 字节）` : ''}${r.backupPath ? '，原文件已备份' : ''}`
+                              : `：${r.error}`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
       </Modal>
 
       <FullCalendar

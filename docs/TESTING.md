@@ -18,7 +18,10 @@ cd apps/server && pnpm test
 不属于离线测试套件。无服务器时只跑离线用例：
 
 ```bash
-cd apps/server && pnpm vitest run src/__tests__/ics-file.test.ts src/__tests__/kanban-id.test.ts
+cd apps/server && pnpm vitest run \
+  src/__tests__/ics-file.test.ts \
+  src/__tests__/kanban-id.test.ts \
+  src/__tests__/webdav-sync.test.ts
 ```
 
 ### Manual Frontend Tests
@@ -66,7 +69,30 @@ cd apps/renderer && pnpm dev    # Terminal 2 (port 5173)
 | 回退为行序 id 且唯一 | 兼容路径 |
 | 项目 / 速记 / 完成态往返 | 其余字段不丢 |
 
-**当前状态：23 项全部通过（2026-10-19 验证）。**
+### `src/__tests__/webdav-sync.test.ts` — WebDAV 同步（17 项）
+
+用 Node `http` 模块模拟一个最小 WebDAV 服务端（`PROPFIND` / `MKCOL` / `PUT` / `GET` / `HEAD`），
+不需要真实服务器。
+
+| 用例 | 锁定的问题 |
+| ---- | ---------- |
+| 读取环境变量 | 配置加载 |
+| `normalizeEtag` 去弱标记与引号 | `W/"abc"` 与 `"abc"` 比较需归一 |
+| 未配置时 status / push 的表现 | 错误信息要可操作（提示设置 `WEBDAV_URL`） |
+| 首次 push 创建远端目录并上传双文件 | 递归 `MKCOL` |
+| push 后同步状态记录两个文件 | `.webdav-state.json` |
+| status 反映真实远端状态 | 含 ETag、上次同步时间、是否变更 |
+| 远端无变化时走 ETag 乐观锁 | `forced === false`，即带 `If-Match` |
+| **远端被其他设备修改时检测冲突且不覆盖** | 核心数据安全点：不能静默覆盖别人的修改 |
+| force 可强制覆盖冲突 | 用户决策路径 |
+| 可只同步指定文件 | `files` 参数 |
+| 本地文件缺失时报错且不影响其他文件 | 单文件失败不阻断整批 |
+| pull 时覆盖本地并备份原文件 | `.bak` 内容是拉取前的本地版本 |
+| **远端无变化时跳过，不冲掉本地改动** | 避免无意义覆盖 |
+| pull force 强制覆盖 | — |
+| 连接测试正常路径 / 认证失败 | 401 要给出明确提示 |
+
+**当前状态：40 项全部通过（2026-10-19 验证）。**
 
 ---
 
@@ -92,7 +118,9 @@ cd apps/renderer && pnpm dev    # Terminal 2 (port 5173)
 | `vite build` | 通过（产物 541KB 主 chunk，仅有 chunk 体积提示） |
 | `ics-file.test.ts` | 14/14 通过 |
 | `kanban-id.test.ts` | 9/9 通过 |
+| `webdav-sync.test.ts` | 17/17 通过 |
 | ICS 导入导出 HTTP 端到端（含去重、replace、下载头、日期过滤、异常输入） | 25/25 通过 |
+| WebDAV 同步端到端（模拟服务端，52 项含逐条细分断言） | 52/52 通过 |
 | 看板 id 漂移专项（未提交的一次性脚本） | 20/20 通过 |
 | Python 参考实现 `parse_kanban.py` | 正常产出 ICS |
 
@@ -100,6 +128,9 @@ cd apps/renderer && pnpm dev    # Terminal 2 (port 5173)
 
 - Electron 桌面端实际启动
 - 真实 CalDAV 服务器的 push / pull 往返
+- **真实 WebDAV 服务器**（坚果云 / Nextcloud 等）—— 测试用的是本地模拟服务端，
+  各服务商对 `PROPFIND` / `MKCOL` / `If-Match` 的支持程度可能有差异，
+  首次接入建议先用测试按钮确认
 - Android 端打包后运行
 
 ---

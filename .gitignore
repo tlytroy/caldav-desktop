@@ -27,4 +27,8 @@ apps/*/build/
 build-tools/
 platform-tools/
 platforms/
-licenses/apps/server/events.md
+licenses/
+
+# WebDAV 同步运行时产物
+.webdav-state.json
+*.md.bak

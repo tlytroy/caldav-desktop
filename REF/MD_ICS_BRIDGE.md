@@ -228,7 +228,6 @@ events:
 | `POST` | `/api/md-bridge/ics/import` | 导入 `.ics` 文件；`dryRun` 预览 / `mode=append\|replace` |
 | `GET`  | `/api/md-bridge/ics/export`  | 导出为单个 `.ics`；`start`/`end` 过滤 / `download=1` |
 | `POST` | `/api/md-bridge/sync/caldav` | 将 events.md 同步到 CalDAV              |
-| `POST` | `/api/md-bridge/sync/webdav` | 将 events.md 同步到 WebDAV（**未实现**） |
 | `GET`  | `/api/md-bridge/config`      | 读取同步配置                            |
 | `PUT`  | `/api/md-bridge/config`      | 更新同步配置                            |
 | `PUT`  | `/api/md-bridge/events/:uid` | 更新单个事件字段（**保留 kanbanTaskId**，避免孤立绑定） |
@@ -238,6 +237,15 @@ events:
 | `PATCH` | `/api/kanban/task/:id`       | 改任务；支持建/改绑定，或 `clearCalendar:true` 删绑定事件 |
 | `DELETE` | `/api/kanban/task/:id`       | 删任务；级联删绑定事件                 |
 | `POST` | `/api/kanban/task/:id/unlink-calendar` | 仅解绑，两边数据都保留         |
+
+### WebDAV 通道 API
+
+| 方法 | 路径                  | 说明 |
+| ---- | --------------------- | ---- |
+| `GET` | `/api/webdav/status`  | 查询配置与双文件本地/远端状态、上次同步时间、远端是否变更 |
+| `POST` | `/api/webdav/push`   | 推送 md 到远端；`files` 限定范围、`force` 强制覆盖 |
+| `POST` | `/api/webdav/pull`   | 拉取覆盖本地；`force` 强制拉取（默认远端无变化则跳过） |
+| `POST` | `/api/webdav/test`   | 连通性 + 认证测试 |
 
 ### 数据流
 
@@ -270,6 +278,20 @@ MD → ICS 转换 → CalDAV PUT
 - [~] 冲突检测（基于 `updated` 时间戳，基础版）
 - [x] 工作台↔日历双向绑定（`kanbanTaskId` / `日历:<uid>`，见上文）
 
+### 第三阶段：WebDAV 同步（2026-10-19 已实现）
+
+- [x] WebDAV 客户端（`apps/server/src/webdav.ts`）
+      只用 Node 内置 fetch，不引第三方依赖（坚果云等对 WebDAV 库兼容性参差）；
+      Basic 认证；远端目录不存在时递归 `MKCOL` 创建。
+- [x] 同步 `events.md` 与 `工作搭子看板.md` 两个文件
+- [x] **ETag 乐观锁**：push 时若远端自上次同步后被其他设备改动，返回 `conflict`，
+      **不静默覆盖**；用户可选择「用本地覆盖远端」或「改用远端内容」。
+- [x] **拉取保护**：只在远端确实变化时才覆盖本地；覆盖前自动备份为 `.bak`
+- [x] 同步状态记录在本地 `.webdav-state.json`（各文件上次同步时的远端 ETag）
+- [x] API：`GET /api/webdav/status`、`POST /api/webdav/push`、`POST /api/webdav/pull`、`POST /api/webdav/test`
+- [x] 日历页工具栏「WebDAV」按钮 + 同步面板（文件状态、连接测试、冲突提示）
+- [x] 服务端不再因 CalDAV 连接失败而 `process.exit(1)` —— md + WebDAV 通道可独立使用
+
 ### 第四阶段：iCalendar 文件导入 / 导出（2026-10-19）
 
 - [x] `parseIcsFile(icsContent)` —— 解析含多个 VEVENT 的完整 .ics 文件
@@ -281,11 +303,11 @@ MD → ICS 转换 → CalDAV PUT
 
 ### 已知边界与后续工作
 
-- **WebDAV 通道**：`.env` 中已预留 `WEBDAV_URL` / `WEBDAV_USER` / `WEBDAV_PASS` / `WEBDAV_EVENTS_PATH`，但**代码尚未实现**，当前 0% 完成。
 - **AI 集成**：`.env` 中 `AI_PROVIDER` / `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` 同为预留配置，无代码读取。
 - **增量同步**：目前按全量 events 遍历，未做 `updated` 时间戳级别的增量。
-- **冲突检测**：仅基于 `updated` 的基础版，未处理真正的并发写入冲突。
-- **删除传播**：从 MD 删除事件后再同步，**不会删除 CalDAV 远端已存在的对应 `.ics`**（缺少墓碑记录）。
+- **冲突检测**：CalDAV 通道仅基于 `updated` 的基础版；WebDAV 通道用 ETag 乐观锁（较可靠）。
+- **删除传播**：从 MD 删除事件后同步，**不会删除 CalDAV 远端已存在的对应 `.ics`**（缺少墓碑记录）。
+- **WebDAV 冲突合并**：检测到冲突时只提示，不做自动三方合并（需用户选一边）。
 
 ### 已知陷阱（踩过的坑，改动相关代码前请先读）
 
@@ -294,3 +316,4 @@ MD → ICS 转换 → CalDAV PUT
 3. **不要用 `new Date("2026-10-02")` 做日期过滤** —— 它按 UTC 午夜解析，在东八区等于本地 08:00，会误排除当天上午的事件。应构造 `${d}T00:00:00`（本地零点）。
 4. **看板任务 id 必须持久化到 md**（`| id:` 字段）。早期用行序 `t0/t1/t2` 定位，而新建任务会 unshift 到队首，导致存量任务 id 整体错位，删 A 会连带删掉 B 的日历事件。
 5. **同步方向有两套命名**：配置层 `md-to-caldav` / `caldav-to-md` / `bidirectional`，同步层 `push` / `pull` / `bidirectional`。必须经 `normalizeSyncDirection()` 转换，直接传配置值会导致同步静默不执行。
+6. **本地 md 路径解析要统一**：`MD_EVENTS_FILE=./events.md` 是相对**进程 cwd** 的。项目里曾同时存在 `path.resolve(cwd, ...)` 与直接用相对串两种写法（结果相同但语义混乱），新增代码统一走 `resolveLocalPath()`。

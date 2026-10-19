@@ -137,12 +137,73 @@ MD_ICS_SYNC_DIRECTION=bidirectional
 | `POST /api/md-bridge/ics/import` | 导入 `.ics`；`dryRun` 预览、按 uid 去重、`append`/`replace` |
 | `GET /api/md-bridge/ics/export` | 导出单个 `.ics`；`start`/`end` 过滤、`download=1` |
 
+### WebDAV 同步（2026-10-19 已实现）
+
+**为什么需要这条通道**：CalDAV 不是人人都有，但 WebDAV 云盘很普及
+（Nextcloud / ownCloud / 坚果云 / Box）。WebDAV 通道直接同步 md 文件本身，
+**不做 ICS 转换**，因此 md 格式在多设备间完全无损。
+
+配置（项目根目录 `.env`）：
+
+```
+WEBDAV_URL=https://dav.example.com/remote.php/dav/files/user
+WEBDAV_USER=your_username
+WEBDAV_PASS=your_password
+WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md   # 只取目录部分
+WEBDAV_TIMEOUT_MS=20000
+```
+
+> `WEBDAV_EVENTS_PATH` 的**文件名部分会被忽略**，远端固定使用
+> `events.md` 与 `工作搭子看板.md` 两个文件名。
+
+同步的文件：
+
+| 文件 | 用途 |
+| ---- | ---- |
+| `events.md` | 日历事件 |
+| `工作搭子看板.md` | 待办 / 项目 / 速记 |
+
+**数据安全设计**：
+
+- **ETag 乐观锁**：push 时比较本地记录的 ETag 与远端当前 ETag。
+  不一致说明远端被其他设备改过，此时返回 `conflict` 而**不覆盖**，
+  UI 提示用户选择「用本地覆盖远端」或「改用远端内容」。
+- **拉取保护**：默认只在远端 ETag 变化时才覆盖本地，
+  避免无意义冲掉未同步的本地修改。
+- **自动备份**：拉取覆盖前把本地文件复制为 `.bak`。
+- **状态记录**：每个 md 同目录下的 `.webdav-state.json` 记录各文件
+  上次同步时的远端 ETag 与时间。
+
+API：
+
+| 接口 | 说明 |
+| ---- | ---- |
+| `GET /api/webdav/status` | 配置 + 双文件本地/远端状态 + 上次同步时间 + 远端是否变更 |
+| `POST /api/webdav/push` | 推送；`files` 限定范围、`force` 强制覆盖 |
+| `POST /api/webdav/pull` | 拉取；`force` 强制覆盖本地 |
+| `POST /api/webdav/test` | 连通性与认证测试 |
+
+UI：日历页工具栏「WebDAV」按钮 → 同步面板（文件状态列表、测试连接、
+推送/拉取、冲突提示）。
+
+> 实现只用 Node 内置 fetch，不引第三方 WebDAV 库 ——
+> 坚果云等服务商对第三方库的兼容性参差，直接用 `PROPFIND`/`MKCOL`/`PUT`
+> + Basic 认证最稳。
+
+### 独立可用性
+
+服务端不再因 CalDAV 连接失败而 `process.exit(1)`。
+`initializeClient()` 内部已捕获错误返回空数组；此前 start() 里额外
+`exit(1)` 会导致「只有 md + WebDAV、没有 CalDAV」的用户完全无法启动服务。
+
 ## Known Gaps
 
-- 删除不同步到远端（缺墓碑记录）
+- **删除不同步到远端**（缺墓碑记录）：从 MD 删除事件后同步，
+  CalDAV 远端已存在的 `.ics` 不会被删除
+- WebDAV 通道**检测到冲突只提示，不做自动三方合并**，需用户选一边
 - 增量同步未实现：目前按全量 events 遍历，未做 `updated` 级增量
-- 冲突检测仅为基于 `updated` 的基础版
-- WebDAV 通道未实现（`.env` 中的 `WEBDAV_*` 是预留变量，无代码读取）
+- CalDAV 通道的冲突检测仅为基于 `updated` 的基础版（WebDAV 通道用 ETag 较可靠）
+- AI 通道未实现（`.env` 中的 `AI_*` 是预留变量，无代码读取）
 - localStorage 缓存层形同虚设，可考虑移除或重新接线
 
 ---
