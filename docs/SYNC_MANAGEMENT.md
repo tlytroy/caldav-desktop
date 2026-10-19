@@ -1,12 +1,26 @@
 # Sync Management & Caching Guide
 
+> ⚠️ **文档状态说明（2026-10-19 校正）**
+>
+> 本文档上半部分描述的 **localStorage 缓存方案已经不再被写入**。
+> 2026-08-21 的数据流重构后，日历模块改读 `events.md`（`useCalendarEvents`
+> 不再调用 `setCachedEvents`），`syncStore.cachedEvents` 目前是**只读的空对象**。
+> 这也是工作台「今日事件 / 事件总数」恒为 0 的根因（已于 2026-10-19 修复为直接读 events.md）。
+>
+> 下方「MD Bridge Sync」章节才是当前真实生效的同步机制。
+> 上半部分保留作为历史设计说明，其中「缓存过期 1 小时」「事件驱动自动同步」
+> 「底部状态栏同步按钮」等描述**与当前实现不符**，不要据此排障。
+
 ## Overview
 
-CalDAV Desktop implements an intelligent sync management system to optimize performance while maintaining data consistency with your Radicale server. This guide explains how the sync system works and how to configure it for optimal performance.
+CalDAV Desktop 的同步分两层：本地 `events.md` 作为唯一事实源，
+ICS/CalDAV 作为可选的同步通道。详见 `REF/MD_ICS_BRIDGE.md`。
 
 ## How Sync Management Works
 
-### Smart Caching System
+### Smart Caching System（⚠️ 历史设计，当前未生效）
+
+> 以下内容描述的是重构前的缓存方案，**当前代码不会写入这些缓存**。
 
 The application implements a local caching mechanism to reduce network requests and improve performance:
 
@@ -18,188 +32,120 @@ The application implements a local caching mechanism to reduce network requests 
 
 ### Sync Strategies
 
-CalDAV Desktop supports multiple sync strategies to balance performance and data freshness:
-
 #### 1. Automatic Sync (Timed Intervals)
 
-Configure automatic sync at these intervals:
-- **5 Minutes**: High-frequency sync for real-time updates
-- **10 Minutes**: Balanced approach for most users
-- **30 Minutes**: Low-frequency sync to conserve bandwidth
+配置项：`MD_ICS_AUTO_SYNC_MINUTES`（后端 `.env`，单位分钟，`0` 表示仅手动）。
+
+> 注意：旧文档提到的「5/10/30 分钟下拉选择」是 UI 层的 `syncInterval`，
+> 与后端定时器是两套东西。当前 UI 未提供该间隔的可视化配置入口。
 
 #### 2. Manual Sync
 
-Trigger immediate sync anytime using the manual sync button in the bottom status bar.
+日历模块工具栏「推送 CalDAV / 拉取 / 双向同步」三个按钮即时触发。
 
 #### 3. Event-Driven Sync
 
-Automatic sync occurs after any event modification (create, update, delete) to ensure server consistency.
+⚠️ 当前**没有**事件驱动的自动同步。用户创建/修改事件只写 `events.md`，
+需要手动点同步或等后端定时器触发。
 
 #### 4. Immediate Feedback with Background Sync
 
-When users perform actions (create, update, delete), the UI immediately reflects the change while the actual synchronization happens in the background. This provides a responsive user experience without blocking the interface.
+UI 立即反映本地变更，同步是独立动作，不阻塞界面。
 
 ## User Interface
 
-### Bottom Sync Status Bar
+### Bottom Sync Status Bar（⚠️ 当前布局下不可见）
 
-A fixed status bar at the bottom of the application provides real-time sync information:
-
-- **Sync Status Indicator**: Visual icons showing current sync state
-- **Last Sync Time**: Shows when the last successful sync occurred
-- **Sync Interval Selector**: Dropdown to change sync frequency
-- **Manual Sync Button**: Trigger immediate sync
+旧版有底部同步状态栏。当前模块化布局（`AppLayout`）为左侧边导航 + 内容区，
+**没有底部状态栏**。同步入口现在在日历模块顶部工具栏。
 
 ### Status Indicators
 
-| Status | Icon | Color | Meaning |
-|--------|------|-------|---------|
-| Idle | ⏰ Clock | Gray | Waiting for next sync |
-| Syncing | 🔄 Spinner | Blue | Currently syncing with server |
-| Success | ✅ Checkmark | Green | Last sync completed successfully |
-| Error | ⚠️ Alert | Red | Last sync failed |
+| 状态 | 位置 |
+| ---- | ---- |
+| 同步中 | 工具栏按钮图标旋转 |
+| 上次同步时间 | 工具栏左侧「上次同步 ...」 |
+| 事件总数 | 工作台「数据源」卡片 |
 
 ## Configuration Options
 
-### Sync Interval Settings
+### 同步间隔
 
-Access sync settings through the bottom status bar:
+编辑项目根目录 `.env`：
 
-1. Open the application
-2. Locate the sync status bar at the bottom
-3. Use the dropdown to select sync interval:
-   - "Manual Sync" - Sync only when triggered
-   - "Every 5 Minutes" - Frequent updates
-   - "Every 10 Minutes" - Balanced updates
-   - "Every 30 Minutes" - Conservative updates
+```
+MD_ICS_ENABLED=true
+MD_ICS_AUTO_SYNC_MINUTES=5      # >0 启用延时自动同步；0 = 仅手动
+MD_ICS_SYNC_DIRECTION=bidirectional
+```
+
+`MD_ICS_SYNC_DIRECTION` 接受 `md-to-caldav` / `caldav-to-md` / `bidirectional`
+（也兼容 `push` / `pull` / `both`），内部经 `normalizeSyncDirection()` 归一化。
+
+> 历史 bug：配置层与同步层曾用两套命名且直接透传，导致按文档填
+> `MD_ICS_SYNC_DIRECTION=md-to-caldav` 时自动同步**静默什么都不做**。已修。
 
 ### Manual Sync
 
-To manually trigger sync:
-
-1. Click the "Sync" button in the bottom status bar
-2. Wait for sync completion (non-blocking operation)
-3. View results in status indicator
-
-## Performance Benefits
-
-### Reduced Network Traffic
-
-- Up to 80% reduction in network requests
-- Eliminates redundant data transfers
-- Faster application response times
-
-### Improved User Experience
-
-- Instant access to recently viewed events
-- Graceful degradation during network issues
-- Non-blocking sync operations
-
-### Battery Life Optimization
-
-- Reduced network activity conserves battery
-- Efficient sync scheduling minimizes CPU usage
-- Smart caching reduces processing overhead
+在日历页点「推送 CalDAV」/「拉取」/「双向同步」。
 
 ## Troubleshooting
 
-### Sync Failures
+### 同步没反应
 
-If sync fails:
+1. 确认 `MD_ICS_ENABLED=true`
+2. 确认 `.env` 中 `CALDAV_ROOT_URL` / `CALDAV_USER` / `CALDAV_PASS` 正确
+3. 看后端日志是否有 `[MD Bridge] 已启用延时自动同步`（仅当间隔 > 0）
+4. 检查 `MD_ICS_SYNC_DIRECTION` 取值是否有效
 
-1. Check internet connection
-2. Verify Radicale server accessibility
-3. Check credentials in settings
-4. Try manual sync
-5. Clear cache if issues persist
+### 删除没有传播到远端（已知限制）
 
-### Cache Issues
-
-To clear cache:
-
-1. Close the application
-2. Clear browser localStorage for the application
-3. Restart the application
-
-### Performance Problems
-
-If experiencing performance issues:
-
-1. Increase sync interval (30 minutes)
-2. Check calendar event count
-3. Monitor system resources
-4. Consider server-side optimization
-
-## Best Practices
-
-### For High Activity Users
-
-- Set sync interval to 5 minutes
-- Regularly clear browser cache
-- Monitor network usage
-
-### For Low Bandwidth Environments
-
-- Set sync interval to 30 minutes
-- Use manual sync when needed
-- Enable airplane mode when offline
-
-### For Power Users
-
-- Combine automatic and manual sync
-- Monitor sync logs in developer tools
-- Customize sync behavior based on workflow
+从 MD 删除事件后同步，**不会删除 CalDAV 远端已存在的 `.ics` 文件**。
+当前 push 只做创建/更新，没有墓碑（tombstone）记录。这是已知遗留问题。
 
 ## Technical Implementation
 
 ### State Management
 
-Sync state is managed using Zustand with persistence:
+`syncStore`（Zustand + persist）当前字段状态：
 
-- `syncInterval`: Current sync interval in milliseconds
-- `lastSyncTime`: Timestamp of last successful sync
-- `isSyncing`: Boolean indicating active sync
-- `syncStatus`: Current sync status ('idle', 'syncing', 'success', 'error')
-- `syncError`: Error message if sync failed
-- `cachedEvents`: Locally cached events by calendar URL
-- `cacheTimestamps`: Cache timestamps by calendar URL
+| 字段 | 状态 |
+| ---- | ---- |
+| `syncInterval` | 持久化，但当前无 UI 消费方 |
+| `lastSyncTime` | 持久化；工作台「上次同步」读它 |
+| `isSyncing` / `syncStatus` / `syncError` | 存在但 `useCalendarEvents` 不更新它们 |
+| `cachedEvents` | **只读空对象**，无人写入 |
+| `cacheTimestamps` | 同上 |
 
-### Cache Strategy
+### MD Bridge Sync（当前真实生效）
 
-1. **Cache First**: Load from cache if available and not expired
-2. **Network Fallback**: Fetch from server if cache invalid
-3. **Cache Update**: Update cache after successful sync
-4. **Cache Expiry**: Expire cache after 1 hour
-
-### Error Handling
-
-- Graceful degradation to cached data
-- Clear error messaging in UI
-- Automatic retry on network failures
-- Preserved user workflow during errors
-
-## MD Bridge Sync (events.md 单一事实源)
-
-2026-08-21 起，日历数据的主通道改为 **`events.md` 单一事实源 + ICS 同步通道**（详见 `REF/MD_ICS_BRIDGE.md`）。与上面的客户端 localStorage 缓存方案并存但分工不同：
+`events.md` 单一事实源 + ICS 同步通道：
 
 - **首屏数据源**：UI 直接读 `events.md`（`GET /api/md-bridge/events`），不依赖 CalDAV 在线。
 - **同步方式**：
-  - 延时自动同步：`MD_ICS_AUTO_SYNC_MINUTES` 配置后台定时器，触发 `POST /api/md-bridge/sync/caldav`。
-  - 手动同步：日历模块顶部「推送 / 拉取 / 双向同步」按钮即时触发。
-- **非实时**：ICS 仅在同步时生成，编辑先落 MD，不需要实时双写。
-- **关联保留**：工作台↔日历双向绑定的 `kanbanTaskId` 在 pull（CalDAV→MD）时不会被覆盖——`eventToIcs` 用 `X-KANBAN-TASK-ID` 扩展属性携带关联，`icsToEvent` 解析回填，pull 合并时优先远程 X- 属性、否则回退本地 `kanbanTaskId`。
+  - 延时自动同步：`MD_ICS_AUTO_SYNC_MINUTES` 配置后台定时器，触发 `performCaldavSync`。
+  - 手动同步：日历模块顶部「推送 / 拉取 / 双向同步」按钮。
+- **非实时**：ICS 仅在同步时生成，编辑先落 MD。
+- **关联保留**：pull 时 `kanbanTaskId` 不会被远端覆盖 —— `eventToIcs` 写出
+  `X-KANBAN-TASK-ID` 扩展属性，`icsToEvent` 解析回填，pull 合并时优先远程
+  X- 属性、否则回退本地 `kanbanTaskId`。
 
-## Future Enhancements
+### 文件导入 / 导出（2026-10-19 新增）
 
-Planned improvements to sync management:
+| 接口 | 说明 |
+| ---- | ---- |
+| `POST /api/md-bridge/ics/import` | 导入 `.ics`；`dryRun` 预览、按 uid 去重、`append`/`replace` |
+| `GET /api/md-bridge/ics/export` | 导出单个 `.ics`；`start`/`end` 过滤、`download=1` |
 
-- Extended offline mode with weeks of cached data
-- Conflict resolution for sync conflicts
-- Selective sync for specific calendars
-- Bandwidth-aware sync throttling
-- Progressive sync for large calendars
+## Known Gaps
+
+- 删除不同步到远端（缺墓碑记录）
+- 增量同步未实现：目前按全量 events 遍历，未做 `updated` 级增量
+- 冲突检测仅为基于 `updated` 的基础版
+- WebDAV 通道未实现（`.env` 中的 `WEBDAV_*` 是预留变量，无代码读取）
+- localStorage 缓存层形同虚设，可考虑移除或重新接线
 
 ---
 
-**Last Updated**: 2026-08-21（新增 MD Bridge Sync 章节）
-**Related Docs**: [README.md](../README.md), [CHANGELOG.md](CHANGELOG.md), [TESTING.md](TESTING.md)
+**Last Updated**: 2026-10-19（校正缓存方案描述失真，新增导入导出与已知问题章节）
+**Related Docs**: [README.md](../README.md), [CHANGELOG.md](CHANGELOG.md), [TESTING.md](TESTING.md), [../REF/MD_ICS_BRIDGE.md](../REF/MD_ICS_BRIDGE.md)

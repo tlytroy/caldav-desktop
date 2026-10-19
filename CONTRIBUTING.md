@@ -62,12 +62,25 @@ pnpm dev
 
 ### Running Tests
 ```bash
-# Run API tests
-./run-tests.sh
+# 后端测试（vitest）
+cd apps/server && pnpm test
 
-# Run frontend tests (if any)
-pnpm test
+# 只跑离线用例（不需要 CalDAV 服务器）
+cd apps/server && pnpm vitest run \
+  src/__tests__/ics-file.test.ts \
+  src/__tests__/kanban-id.test.ts
+
+# 前端测试
+cd apps/renderer && pnpm test
+
+# 类型检查 / 构建
+cd apps/server && npx tsc --noEmit
+cd apps/renderer && npx tsc --noEmit && pnpm build
 ```
+
+> 注：仓库中**没有** `run-tests.sh`（2026-06 的文档曾引用它，实际从未存在）。
+> 需要真实 CalDAV 服务器的测试请在 `.env` 中配置 `CALDAV_URL` / `CALDAV_USER` / `CALDAV_PASS`。
+> 详见 [docs/TESTING.md](docs/TESTING.md)。
 
 ### Writing Tests
 - Add test cases for new features

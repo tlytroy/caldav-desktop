@@ -2,6 +2,72 @@
 
 All notable changes to CalDAV Desktop are documented here.
 
+## [Unreleased] - 2026-10-19
+
+### 🐛 Critical Bug Fixes
+
+这批问题都曾让功能处于**不可用**状态，但此前的文档把它们描述为「已完成」。
+
+- **日历上一个事件都不显示**
+  `events.md` 用 `date`/`end` 字段，FullCalendar 只认 `start`/`end`，
+  原实现直接把 MdEvent 展开传入，字段全部对不上。
+  新增 `toFullCalendarEvent()` 映射层。
+
+- **任务 ID 行序漂移导致误删**
+  三套 ID 体系混用：解析用行序 `t0/t1/t2`、POST 用时间戳、写回不保存。
+  新建任务 unshift 到队首会让所有存量任务 ID 整体错位，
+  删 A 会连带删掉 B 的日历事件。
+  改为把稳定 ID 持久化到 md 的 `| id:` 字段。
+
+- **时区偏移 8 小时**
+  `new Date("...T09:00:00.000Z")` 把东八区 9 点当成 UTC 9 点存储。
+
+- **全天事件导出零长度**
+  ICS 的 DTEND 是排他边界，必须是次日 00:00；与 DTSTART 同日会被客户端忽略。
+  同时修正 `VALUE=DATE` 用 `toISOString()` 导致的跨时区跨日。
+
+- **同步方向配置静默失效**
+  配置层用 `md-to-caldav`/`caldav-to-md`，同步层认 `push`/`pull`，
+  按文档填配置会导致自动同步什么都不做。新增 `normalizeSyncDirection()`。
+
+- **工作台数据恒为 0**
+  「今日事件」「事件总数」读的是数据流重构后已无人写入的
+  `syncStore.cachedEvents`。改为直接读 `events.md`。
+
+### ✨ New Features
+
+- **iCalendar 文件导入 / 导出**
+  - `parseIcsFile()`：解析多 VEVENT 文件（此前只取第一条）
+  - `eventsFileToIcs()`：导出为单个 VCALENDAR
+  - `POST /api/md-bridge/ics/import`：dryRun 预览、按 uid 去重、append/replace
+  - `GET /api/md-bridge/ics/export`：日期范围过滤、直接下载
+  - 日历页工具栏「导入 ICS」「导出 ICS」+ 预览确认弹窗
+
+### 🧹 Refactor
+
+- 消除 `md-bridge.ts` 中 248 行与 `kanban.ts` 重复的看板读写实现（含死代码），
+  统一按稳定 ID 定位
+- `PATCH /task/:id` 不再允许覆盖 ID，剔除 `calendar`/`clearCalendar` 控制指令
+  避免污染 md 字段
+- 标签选择器选中态修复（字符串数组 vs 对象数组结构不一致）
+- 逾期判定统一（原本红字与告警条两套逻辑，且当天到期被误判）
+
+### 📝 Documentation Corrections
+
+- **删除 README 中「`./run-tests.sh` 9/9 通过」的声明 —— 该文件不存在**
+- 重写 `docs/TESTING.md`：旧版本「44+ 测试 100% 通过」的数字无法复现
+- Roadmap 按真实完成度重新标注 `[x]`/`[~]`/`[ ]`
+- `.env` 中 `WEBDAV_*` 与 `AI_*` 标注为「尚未实现」（此前是无代码读取的死配置）
+- 补充看板 `id:`/`日历:` 字段规范，同步更新 Python 参考 parser
+
+### 🧪 Tests
+
+- `ics-file.test.ts`（14 项）
+- `kanban-id.test.ts`（9 项）
+- HTTP 端到端验证 25 项（导入导出、去重、replace、下载头、日期过滤、异常输入）
+
+---
+
 ## [0.1.0] - 2026-06-22
 
 ### 🎉 Initial Release - Production Ready

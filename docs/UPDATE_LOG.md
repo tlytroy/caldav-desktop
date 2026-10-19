@@ -2,6 +2,88 @@
 
 这个文件记录了项目的持续更新和改进。每次更新都应该在这个文件中添加相关信息，而不是创建新的更新日志文件。
 
+## 2026-10-19
+
+### 全面审查：修复阻塞级 bug + 新增 iCalendar 导入导出
+
+起因是用户反馈「很多功能感觉之前开发的时候并没有实现，文档记录与实际不符」。
+逐层核对文档与源码后，发现若干**让核心功能完全不可用**的问题，均已修复并补测试。
+
+**阻塞级 bug（功能此前实际不可用）**
+
+- **日历上一个事件都不显示**：`Calendar.tsx` 把 MdEvent（字段 `date`/`end`）
+  直接展开传给 FullCalendar，而后者只认 `start`/`end`，字段全部对不上。
+  新增 `toFullCalendarEvent()` 映射层。
+- **任务 ID 行序漂移导致误删**：解析用行序 `t0/t1/t2`、`POST /task` 用时间戳、
+  `serializeKanban` 又不保存 id —— 三套体系混用。新建任务 unshift 到队首会让
+  所有存量任务 ID 整体错位，**删 A 会连带删掉 B 的日历事件**。
+  改为把稳定 ID 持久化到 md 的 `| id:` 字段，行序仅作旧文件兼容回退。
+- **时区偏移 8 小时**：`composeCalendarDate` 用 `new Date("...T09:00:00.000Z")`，
+  等于把东八区 9 点当成 UTC 9 点存进文件。
+- **全天事件零长度**：ICS 的 DTEND 是排他边界，必须是次日 00:00；
+  与 DTSTART 同日导出的零长度事件，客户端可能直接不显示。
+  同时修正全天事件 `VALUE=DATE` 用 `toISOString()` 导致的跨时区跨日。
+- **同步方向配置静默失效**：配置层用 `md-to-caldav`/`caldav-to-md`，
+  同步层只认 `push`/`pull`，直接传配置值会让自动同步什么都不做
+  （且 TypeScript 类型不兼容）。新增 `normalizeSyncDirection()` 统一。
+- **工作台数据恒为 0**：「今日事件」「事件总数」读 `syncStore.cachedEvents`，
+  而数据流重构后已无人写入该缓存。改为直接读 `events.md`。
+
+**重构与清理**
+
+- 删除 `routes/md-bridge.ts` 中 248 行与 `routes/kanban.ts` 重复的看板读写实现。
+  旧的内联版 `appendCalendarToTask` 存在重复拼接且生成的整行是死代码；
+  `insertKanbanTaskLine` 算出的 newId 与实际写入行的 id 不一致。
+  现统一复用 kanban.ts 的实现（按稳定 ID 定位）。
+- `PATCH /task/:id` 不再允许覆盖 ID，并剔除 `calendar` / `clearCalendar`
+  控制指令，避免把非任务字段写进 md。
+- 标签选择器选中态永不点亮（`formData.tags` 是字符串数组，
+  而 TagSelector 按 `t.id` 比较对象），改为按名字匹配。
+- 逾期判定统一：原本红字与告警条是两套逻辑，且当天到期的任务会被误判为逾期。
+- 事件弹窗「查看任务」链接路径错误（`/modules/tasks` 不存在），
+  且同时设置 hash 与 href 会触发整页重载。
+
+**新功能：iCalendar 文件导入 / 导出**
+
+- `parseIcsFile()`：解析含多个 VEVENT 的完整 .ics。此前 `icsToEvent` 正则
+  不带 `g` 标志只取第一条，导入 Google/Outlook/Apple 导出的日历会丢掉绝大部分事件。
+- `eventsFileToIcs()`：把 events.md 导出为单个 VCALENDAR 文件。
+- `POST /api/md-bridge/ics/import`：支持 `dryRun` 预览（前端先展示"能导入几条"
+  再确认）、按 uid 去重、`append` / `replace` 两种模式。
+- `GET /api/md-bridge/ics/export`：支持 `start` / `end` 日期范围过滤、
+  `download=1` 直接下载。
+- 日历页工具栏「导入 ICS」「导出 ICS」按钮 + 导入预览确认弹窗。
+- 日期过滤曾有个时区 bug：`new Date("2026-10-02")` 按 UTC 午夜解析，
+  在东八区等于本地 08:00，会误排除当天上午的事件（测试导出 0 条才发现）。
+
+**文档校正（此前多处失真）**
+
+- README 声称 `./run-tests.sh` 9/9 通过 —— **该文件在仓库中不存在**。
+  已删除该声明，改为真实的 `pnpm test`。
+- 重写 `docs/TESTING.md`：旧版本「Backend 9/9、E2E 28/28、总计 44+ 100% 通过」
+  的数字全部无法复现。现在只描述实际存在、可运行、已验证的测试。
+- Roadmap 六个 Phase 原先全为未勾选，但框架/Dashboard/任务模块其实已实现。
+  改为按真实完成度标注 `[x]` / `[~]`（部分实现或已知限制）/ `[ ]`。
+- `.env` 中 `WEBDAV_*` 与 `AI_*` 共 7 个变量**没有任何代码读取**，属于纯死配置。
+  已加注释明确标注「尚未实现」。WebDAV 同步是你明确要的功能，当前完成度 0%。
+- 补充看板 `id:` / `日历:` 字段规范到 `REF/work-dazi-toolkit/开发指南.md`，
+  并同步更新 Python 参考 parser `parse_kanban.py`（新增 id 解析与行序回退）。
+- `REF/MD_ICS_BRIDGE.md` 新增「已知陷阱」章节，记录 5 个会导致静默错误的时间/ID 处理细节。
+
+**测试**
+
+- 新增 `apps/server/src/__tests__/ics-file.test.ts`（14 项）
+- 新增 `apps/server/src/__tests__/kanban-id.test.ts`（9 项）
+- HTTP 端到端验证（一次性脚本，未入库）25 项全通过
+- 前后端 TypeScript 类型检查通过、`vite build` 通过、Python 参考实现验证通过
+
+**已知遗留（未修）**
+
+- 从 MD 删除事件后同步，**不会删除 CalDAV 远端已存在的对应 `.ics`**（缺墓碑记录）。
+- WebDAV 通道未实现。
+- Android 端架构前提：md 读写与同步核心需下沉到渲染层或改用 Capacitor 插件，
+  因为移动端没有 Node 后端。
+
 ## 2026-08-21
 
 ### 工作台 ↔ 日历双向绑定 + 同步关联保留

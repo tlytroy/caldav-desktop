@@ -1,5 +1,23 @@
 # 积木式模块化架构设计
 
+> ⚠️ **文档与代码的差异说明（2026-10-19 校正）**
+>
+> 下文「目录结构设计」是原始设计稿，与实际代码有出入。实际情况：
+>
+> | 设计稿 | 实际 |
+> | ------ | ---- |
+> | `modules/dashboard/{DashboardModule.tsx, pages/, components/, hooks/}` | 单文件 `modules/dashboard/index.tsx` |
+> | `modules/calendar/pages/CalendarPage.tsx` 等分层 | 单文件 `modules/calendar/index.tsx` |
+> | `framework/ModuleProvider.tsx` | 并入 `framework/ModuleRegistry.tsx` |
+> | `framework/ErrorBoundary.tsx` | 位于 `components/ui/ErrorBoundary.tsx` |
+> | `shared/{ui,api,store,hooks,utils,types}` | 平铺为 `api/`、`store/`、`hooks/`、`components/`、`types/` |
+> | `modules/{git-sync,ai-agent,notifications}/index.ts` | 三者共用 `modules/placeholder/index.tsx` |
+> | `settings` / `roadmap` 独立模块 | 未注册，仍是 `components/settings/SettingsModal.tsx` 与 `features/roadmap/` |
+>
+> 框架核心（ModuleRegistry / AppRouter / AppLayout / ModuleSlot）与
+> 「active / placeholder」状态机制是**真实可用**的，上表的差异属于组织形式层面，
+> 不影响模块注册与路由的工作方式。
+
 ## 核心理念
 
 本架构采用 **"积木式"微模块架构**，所有功能模块独立开发、独立注册、独立部署（代码分割），通过统一的 Module Registry 进行组装。未开发的模块使用占位组件，不阻塞主框架。
@@ -249,34 +267,36 @@ export default gitSyncModule;
 - [x] 创建 framework/ 核心框架
 - [x] 实现 ModuleRegistry
 - [x] 实现 ModuleSlot 占位系统
-- [x] 实现 AppRouter 路由系统
+- [x] 实现 AppRouter 路由系统（hash 路由，无 react-router 依赖）
 - [x] 实现 AppLayout 布局系统
 
 ### Phase 2: 模块化改造
 
-- [ ] 重构 calendar 为独立模块
-- [ ] 重构 sync 为独立模块
-- [ ] 重构 settings 为独立模块
-- [ ] 重构 roadmap 为独立模块
+- [x] calendar 模块（`modules/calendar`，active）
+- [x] tasks 任务看板模块（`modules/tasks`，active）
+- [x] dashboard 工作台模块（`modules/dashboard`，active）
+- [ ] sync 模块（当前同步能力在日历模块工具栏内，未独立成模块）
+- [ ] settings 模块（仍是 `components/settings/SettingsModal.tsx`）
+- [ ] roadmap 模块（`features/roadmap/FeatureRoadmap.tsx` 未注册到 registry）
 
 ### Phase 3: 工作台页面 ✅
 
 - [x] 创建 Dashboard 模块
 - [x] 实现欢迎卡片
-- [x] 实现今日日程概览
-- [x] 实现快速操作区
-- [x] 实现模块快速入口网格
-- [x] 实现同步状态卡片
+- [x] 实现今日事件概览（2026-10-19 改为直接读 `events.md`）
+- [x] 实现今日待办概览
+- [x] 实现系统状态卡片
+- [x] 实现同步状态详情
 
-### Phase 4: 占位模块创建
+### Phase 4: 占位模块
 
-- [ ] git-sync 占位模块（WebDAV + Git 双通道同步）
-- [ ] ai-agent 占位模块（AI 驱动的笔记→日历工作流）
-- [ ] notifications 占位模块（多渠道推送通知）
+- [x] git-sync / ai-agent / notifications 三个模块已注册（status=placeholder，共用通用占位页）
+- [ ] 各模块的实际功能
 
 ### Phase 5: 清理与优化
 
-- [ ] 删除旧目录结构
-- [ ] 更新导入路径
-- [ ] 代码分割验证
-- [ ] 性能测试
+- [x] 旧 `AppShell` 保留为回退路径（`App.tsx` 的 `useModularUI` 开关，当前为 `true`）
+- [x] 主题系统回写修复（`theme/ThemeApplier.tsx` + `index.css` 的 `@theme inline`）
+- [x] 缺失的 `styles/touch-optimized.css` / `styles/responsive.css` 补齐
+- [ ] `AppShell` 与相关 props 清理（模块化 UI 已默认启用，旧分支为死代码）
+- [ ] 代码分割粒度优化（主 chunk 541KB，可进一步拆分）
