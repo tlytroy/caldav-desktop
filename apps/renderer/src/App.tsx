@@ -2,6 +2,7 @@ import React from "react";
 import { ModuleProvider, AppRouter, AppLayout } from "./framework";
 import { useRegisterModules } from "./modules/useRegisterModules";
 import { AppShell } from "./app/AppShell";
+import { ThemeApplier } from "./theme/ThemeApplier";
 import { useCalendars } from "./hooks/useCalendars";
 import { useCalendarStore } from "./store/calendarStore";
 
@@ -26,7 +27,7 @@ function ModuleRegistration({ children }: { children: React.ReactNode }) {
  * 通过 useModularUI 状态控制是否启用模块化界面。
  */
 export default function App() {
-  const [useModularUI] = React.useState(false);
+  const [useModularUI] = React.useState(true);
 
   // 现有逻辑
   const {
@@ -88,36 +89,42 @@ export default function App() {
   // 如果启用模块化 UI
   if (useModularUI) {
     return (
-      <ModuleProvider>
-        <ModuleRegistration>
-          <AppLayout>
-            <AppRouter />
-          </AppLayout>
-        </ModuleRegistration>
-      </ModuleProvider>
+      <>
+        <ThemeApplier />
+        <ModuleProvider>
+          <ModuleRegistration>
+            <AppLayout>
+              <AppRouter />
+            </AppLayout>
+          </ModuleRegistration>
+        </ModuleProvider>
+      </>
     );
   }
 
   // 默认使用现有 UI（逐步迁移）
   return (
-    <AppShell
-      calendars={calendars}
-      selectedCalendarUrl={selectedCalendarUrl}
-      config={config}
-      isConfigModalOpen={isConfigModalOpen}
-      isSettingsModalOpen={isSettingsModalOpen}
-      setSelectedCalendarUrl={setSelectedCalendarUrl}
-      setIsConfigModalOpen={setIsConfigModalOpen}
-      onOpenSettings={() => setIsSettingsModalOpen(true)}
-      onCloseSettings={() => setIsSettingsModalOpen(false)}
-      onFilterChange={setEventFilter}
-      onTestConnection={handleTestConnection}
-      onSaveConfig={handleSaveConfig}
-      onSetConfig={(partial) => setConfig(partial)}
-      onManualSync={handleManualSync}
-      configLoading={configLoading}
-      testResult={testResult}
-      refreshCalendars={refreshCalendars}
-    />
+    <>
+      <ThemeApplier />
+      <AppShell
+        calendars={calendars}
+        selectedCalendarUrl={selectedCalendarUrl}
+        config={config}
+        isConfigModalOpen={isConfigModalOpen}
+        isSettingsModalOpen={isSettingsModalOpen}
+        setSelectedCalendarUrl={setSelectedCalendarUrl}
+        setIsConfigModalOpen={setIsConfigModalOpen}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onCloseSettings={() => setIsSettingsModalOpen(false)}
+        onFilterChange={setEventFilter}
+        onTestConnection={handleTestConnection}
+        onSaveConfig={handleSaveConfig}
+        onSetConfig={(partial) => setConfig(partial)}
+        onManualSync={handleManualSync}
+        configLoading={configLoading}
+        testResult={testResult}
+        refreshCalendars={refreshCalendars}
+      />
+    </>
   );
 }

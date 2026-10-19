@@ -178,6 +178,17 @@ Sync state is managed using Zustand with persistence:
 - Automatic retry on network failures
 - Preserved user workflow during errors
 
+## MD Bridge Sync (events.md 单一事实源)
+
+2026-08-21 起，日历数据的主通道改为 **`events.md` 单一事实源 + ICS 同步通道**（详见 `REF/MD_ICS_BRIDGE.md`）。与上面的客户端 localStorage 缓存方案并存但分工不同：
+
+- **首屏数据源**：UI 直接读 `events.md`（`GET /api/md-bridge/events`），不依赖 CalDAV 在线。
+- **同步方式**：
+  - 延时自动同步：`MD_ICS_AUTO_SYNC_MINUTES` 配置后台定时器，触发 `POST /api/md-bridge/sync/caldav`。
+  - 手动同步：日历模块顶部「推送 / 拉取 / 双向同步」按钮即时触发。
+- **非实时**：ICS 仅在同步时生成，编辑先落 MD，不需要实时双写。
+- **关联保留**：工作台↔日历双向绑定的 `kanbanTaskId` 在 pull（CalDAV→MD）时不会被覆盖——`eventToIcs` 用 `X-KANBAN-TASK-ID` 扩展属性携带关联，`icsToEvent` 解析回填，pull 合并时优先远程 X- 属性、否则回退本地 `kanbanTaskId`。
+
 ## Future Enhancements
 
 Planned improvements to sync management:
@@ -190,5 +201,5 @@ Planned improvements to sync management:
 
 ---
 
-**Last Updated**: 2026-06-25
+**Last Updated**: 2026-08-21（新增 MD Bridge Sync 章节）
 **Related Docs**: [README.md](../README.md), [CHANGELOG.md](CHANGELOG.md), [TESTING.md](TESTING.md)

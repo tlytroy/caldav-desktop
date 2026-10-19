@@ -20,71 +20,61 @@ export function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalPr
     xl: 'max-w-xl',
   };
 
-  // 处理ESC键关闭
+  // ESC 关闭 + 防止背景滚动
   React.useEffect(() => {
+    if (!isOpen) return;
     const handleEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
+      if (event.key === 'Escape') onClose();
     };
-
-    if (isOpen) {
-      document.addEventListener('keydown', handleEsc);
-      // 防止背景滚动
-      document.body.style.overflow = 'hidden';
-    }
-
+    document.addEventListener('keydown', handleEsc);
+    document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', handleEsc);
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = '';
     };
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 overflow-y-auto"
-      aria-modal="true"
-      role="dialog"
-    >
-      {/* 使用flexbox确保在所有屏幕尺寸下都居中 */}
-      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
-        {/* Background overlay */}
-        <div
-          className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75 dark:bg-gray-800 dark:bg-opacity-75"
-          aria-hidden="true"
-          onClick={onClose}
-        />
+    // 外层：固定铺满视口
+    <div className="fixed inset-0 z-50">
+      {/* 半透明遮罩：独立 fixed 层，不参与 flex 布局，避免挤偏 panel */}
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity"
+        aria-hidden="true"
+        onClick={onClose}
+      />
 
-        {/* Modal panel - 使用现代flexbox居中方法 */}
-        <div
-          className={`inline-block align-bottom bg-white dark:bg-neutral-700 ${borderRadius} text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:w-full ${sizeClasses[size]} max-h-[90vh] flex flex-col w-full ${size === 'xl' ? 'max-w-4xl' : size === 'lg' ? 'max-w-2xl' : size === 'md' ? 'max-w-lg' : 'max-w-md'} mx-auto ${size === 'xl' ? '2xl:max-w-5xl' : ''}`}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="modal-headline"
-        >
-          <div className={`px-4 pt-5 pb-4 bg-white dark:bg-neutral-700 ${borderRadius} sm:p-6 sm:pb-4 flex-shrink-0`}>
-            <div className="flex items-center justify-between mb-4">
+      {/* 居中容器：另一独立 fixed 层，用 flex 让 panel 真正居中 */}
+      <div className="fixed inset-0 overflow-y-auto">
+        <div className="flex min-h-full items-center justify-center p-4">
+          <div
+            className={`relative bg-white dark:bg-neutral-900 ${borderRadius} shadow-2xl ring-1 ring-black/5 w-full ${sizeClasses[size]} max-h-[90vh] flex flex-col`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-headline"
+          >
+            <div className={`px-5 pt-5 pb-4 ${borderRadius} flex items-start justify-between flex-shrink-0 border-b border-gray-100 dark:border-neutral-800`}>
               <h3
-                className="text-lg font-medium leading-6 text-gray-900 dark:text-white"
+                className="text-lg font-semibold text-gray-900 dark:text-white pr-4"
                 id="modal-headline"
               >
                 {title}
               </h3>
               <button
                 type="button"
-                className="text-gray-400 bg-white dark:bg-neutral-700 dark:text-gray-300 rounded-md hover:text-gray-500 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 p-1"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-brand rounded-md p-1 -m-1"
                 onClick={onClose}
                 aria-label="关闭对话框"
               >
                 <span className="sr-only">关闭</span>
-                <X className="w-6 h-6" aria-hidden="true" />
+                <X className="w-5 h-5" aria-hidden="true" />
               </button>
             </div>
-          </div>
-          <div className="overflow-y-auto flex-grow px-4 pb-4 sm:px-6 sm:pb-6" style={{ maxHeight: 'calc(90vh - 150px)' }}>
-            {children}
+            <div className="overflow-y-auto flex-grow px-5 py-4">
+              {children}
+            </div>
           </div>
         </div>
       </div>

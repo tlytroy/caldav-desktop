@@ -74,6 +74,7 @@ events:
     description: "string"     # 描述/备注
     updated: "ISO 8601"       # 最后更新时间
     source: "caldav" | "md" | "ai"  # 来源标记
+    kanbanTaskId: "string"    # 关联的工作搭子任务 ID（工作台↔日历双向绑定；见下文）
   - ...
 ---
 ```
@@ -89,6 +90,14 @@ events:
 | **updated 字段**     | 用于冲突检测和增量同步                              |
 
 ## 同步策略
+
+### 同步时机：非实时（延时自动 + 手动）
+
+`events.md` 是日历的**唯一事实源（SSOT）**，ICS 只是同步通道、不是首屏数据源：
+
+- 所有编辑（增/删/改，以及工作台↔日历双向绑定）都先落到 `events.md`；UI 首屏直接读 `events.md`，不依赖 CalDAV 在线。
+- ICS 同步**不需要实时**：通过「延时自动同步」（`MD_ICS_AUTO_SYNC_MINUTES`，后台定时器触发 `POST /api/md-bridge/sync/caldav`）与「手动同步」（UI 顶部 推送 / 拉取 / 双向同步 按钮）两种方式进行。
+- 拉取（CalDAV → MD）把远端事件合并进 `events.md`，但**保留本地关联字段**（见「关联保留语义」），不会把工作台↔日历绑定冲掉。
 
 ### 方式一：CalDAV 同步（主力）
 
@@ -145,6 +154,37 @@ events:
                   PR 方式审核 AI 的修改
 ```
 
+## 工作台 ↔ 日历双向绑定（2026-08-21）
+
+工作台「任务看板」与日历并非两份独立数据，而是通过轻量引用字段**互链**，两端共享同一个事件/任务实体。
+
+### 互链字段
+
+| 位置 | 字段 | 形式 |
+| ---- | ---- | ---- |
+| 工作搭子看板（`工作搭子看板.md`）任务行 | `calendarEventUid` | 行尾 `\| 日历:<uid>`（如 `- [ ] [高] 写周报 \| 日历:md-event-abc`） |
+| `events.md` 事件（YAML frontmatter） | `kanbanTaskId` | `kanbanTaskId: "t3"` |
+
+### 行为
+
+- **工作台加任务 → 同时入日历**：任务表单勾选「📅 同时加入日历」并填日期/时间，创建任务的同时写入对应事件，任务行打上「📅 已加入日历」标识。
+- **日历加事件 → 同时入看板**：事件表单勾选「📋 同时加入任务看板」并选优先级，创建事件的同时在看板插入一条任务，事件弹窗显示「📋 已在任务看板」。
+- **级联删除**：删任务时勾选「同时删除日历事件」→ 连事件一起删；删事件时勾选「同时删看板任务」→ 连任务一起删。
+- **解绑不删除**：`POST /api/kanban/task/:id/unlink-calendar` 只去掉指针，两边数据都保留。
+- **编辑不丢链**：`PUT /api/md-bridge/events/:uid` 更新事件时强制保留 `kanbanTaskId`，避免编辑事件把任务关联孤立。
+
+### 关联保留语义（同步不丢绑定）
+
+ICS 标准字段里没有「关联任务」概念，同步时必须特殊处理，否则「延时自动同步 / 手动拉取」会用远端 ICS 覆盖本地事件、把 `kanbanTaskId` 清空：
+
+1. **导出（MD → ICS）**：`eventToIcs` 额外写出自定义扩展属性 `X-KANBAN-TASK-ID:<id>`，使 push 到 CalDAV 的 `.ics` 也携带关联。
+2. **导入（ICS → MD）**：`icsToEvent` 解析 `X-KANBAN-TASK-ID` 回填 `kanbanTaskId`；没有该属性的外部真实 CalDAV 事件则为空。
+3. **Pull 合并**：`POST /api/md-bridge/sync/caldav` 的 pull 分支更新已有事件时，优先采用远程 ICS 里的 `X-KANBAN-TASK-ID`，否则**回退保留本地已有的 `kanbanTaskId`**——保证任何一次拉取都不会打掉工作台↔日历绑定。
+
+### 防重复显示
+
+日历模块渲染时，带 `calendarEventUid` 的看板任务已从「外部事件叠加层」过滤掉（它们已作为 `events.md` 里的真实事件显示），避免同一条任务在日历中双显。
+
 ## 与 AI 助手的协同
 
 ### AI 读取数据
@@ -185,10 +225,19 @@ events:
 | ------ | ---------------------------- | --------------------------------------- |
 | `GET`  | `/api/md-bridge/events`      | 读取 events.md 返回所有事件             |
 | `PUT`  | `/api/md-bridge/events`      | 写入完整 events.md（AI/用户编辑后保存） |
+| `POST` | `/api/md-bridge/ics/import` | 导入 `.ics` 文件；`dryRun` 预览 / `mode=append\|replace` |
+| `GET`  | `/api/md-bridge/ics/export`  | 导出为单个 `.ics`；`start`/`end` 过滤 / `download=1` |
 | `POST` | `/api/md-bridge/sync/caldav` | 将 events.md 同步到 CalDAV              |
-| `POST` | `/api/md-bridge/sync/webdav` | 将 events.md 同步到 WebDAV              |
+| `POST` | `/api/md-bridge/sync/webdav` | 将 events.md 同步到 WebDAV（**未实现**） |
 | `GET`  | `/api/md-bridge/config`      | 读取同步配置                            |
 | `PUT`  | `/api/md-bridge/config`      | 更新同步配置                            |
+| `PUT`  | `/api/md-bridge/events/:uid` | 更新单个事件字段（**保留 kanbanTaskId**，避免孤立绑定） |
+| `POST` | `/api/md-bridge/events/add`  | 追加事件；可带 `kanban:{priority,project,due?}` 同步建看板任务 |
+| `DELETE` | `/api/md-bridge/events/:uid` | 删除事件；若绑定任务则级联删看板任务   |
+| `POST` | `/api/kanban/task`           | 建任务；可带 `calendar:{date,time,endDate?,endTime?,allDay?}` 同步建日历事件 |
+| `PATCH` | `/api/kanban/task/:id`       | 改任务；支持建/改绑定，或 `clearCalendar:true` 删绑定事件 |
+| `DELETE` | `/api/kanban/task/:id`       | 删任务；级联删绑定事件                 |
+| `POST` | `/api/kanban/task/:id/unlink-calendar` | 仅解绑，两边数据都保留         |
 
 ### 数据流
 
@@ -206,29 +255,42 @@ MD → ICS 转换 → CalDAV PUT
 
 ## 实现计划
 
-### 第一阶段：核心文件格式与编辑（当前）
+### 第一阶段：核心文件格式与编辑
 
 - [x] `events.md` 格式定义
 - [x] MD frontmatter 解析（支持 events 数组）
-- [ ] MD frontmatter 写入（追加/更新/删除事件）
-- [ ] `GET/PUT /api/md-bridge/events` API
+- [x] MD frontmatter 写入（追加/更新/删除事件，含 `kanbanTaskId` 字段）
+- [x] `GET/PUT /api/md-bridge/events` API（PUT 保留关联）
 
 ### 第二阶段：CalDAV 同步
 
-- [ ] events.md → ICS 批量转换
-- [ ] 增量同步（只推送修改过的事件）
-- [ ] 冲突检测（基于 updated 时间戳）
-- [ ] 双向同步（从 CalDAV 拉取更新 events.md）
+- [x] events.md → ICS 批量转换（`allEventsToIcs`）
+- [x] 双向同步：push（MD→CalDAV）+ pull（CalDAV→MD，保留本地 `kanbanTaskId`）
+- [~] 增量同步（目前按全量 events 遍历；未完成 `updated` 时间戳级别的精细增量）
+- [~] 冲突检测（基于 `updated` 时间戳，基础版）
+- [x] 工作台↔日历双向绑定（`kanbanTaskId` / `日历:<uid>`，见上文）
 
-### 第三阶段：WebDAV 同步
+### 第四阶段：iCalendar 文件导入 / 导出（2026-10-19）
 
-- [ ] WebDAV 配置界面
-- [ ] events.md 上传/下载
-- [ ] 定时自动同步
+- [x] `parseIcsFile(icsContent)` —— 解析含多个 VEVENT 的完整 .ics 文件
+      （此前 `icsToEvent` 只取第一条 VEVENT，导入 Google/Outlook 导出的日历会丢数据）
+- [x] `eventsFileToIcs(eventsFile)` —— 导出为单个 VCALENDAR 文件
+- [x] `POST /api/md-bridge/ics/import` —— 支持 `dryRun` 预览、按 uid 去重、`append` / `replace` 两种模式
+- [x] `GET /api/md-bridge/ics/export` —— 支持 `start` / `end` 日期范围过滤与 `download=1` 直接下载
+- [x] 日历页工具栏「导入 ICS」「导出 ICS」按钮 + 导入预览确认弹窗
 
-### 第四阶段：AI 集成
+### 已知边界与后续工作
 
-- [ ] AI 读取 events.md 作为上下文
-- [ ] AI 写入新事件到 events.md
-- [ ] AI 编辑现有事件
-- [ ] AI 自动触发同步
+- **WebDAV 通道**：`.env` 中已预留 `WEBDAV_URL` / `WEBDAV_USER` / `WEBDAV_PASS` / `WEBDAV_EVENTS_PATH`，但**代码尚未实现**，当前 0% 完成。
+- **AI 集成**：`.env` 中 `AI_PROVIDER` / `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` 同为预留配置，无代码读取。
+- **增量同步**：目前按全量 events 遍历，未做 `updated` 时间戳级别的增量。
+- **冲突检测**：仅基于 `updated` 的基础版，未处理真正的并发写入冲突。
+- **删除传播**：从 MD 删除事件后再同步，**不会删除 CalDAV 远端已存在的对应 `.ics`**（缺少墓碑记录）。
+
+### 已知陷阱（踩过的坑，改动相关代码前请先读）
+
+1. **全天事件的 DTEND 是排他的**，必须是次日 00:00。与 DTSTART 同日会导出零长度事件，部分客户端直接不显示。
+2. **全天事件的 `VALUE=DATE` 不能用 `toISOString()` 生成** —— 那是 UTC 换算，东八区凌晨的事件会落到前一天。应取本地 `getFullYear/getMonth/getDate`。
+3. **不要用 `new Date("2026-10-02")` 做日期过滤** —— 它按 UTC 午夜解析，在东八区等于本地 08:00，会误排除当天上午的事件。应构造 `${d}T00:00:00`（本地零点）。
+4. **看板任务 id 必须持久化到 md**（`| id:` 字段）。早期用行序 `t0/t1/t2` 定位，而新建任务会 unshift 到队首，导致存量任务 id 整体错位，删 A 会连带删掉 B 的日历事件。
+5. **同步方向有两套命名**：配置层 `md-to-caldav` / `caldav-to-md` / `bidirectional`，同步层 `push` / `pull` / `bidirectional`。必须经 `normalizeSyncDirection()` 转换，直接传配置值会导致同步静默不执行。

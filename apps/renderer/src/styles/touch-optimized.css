@@ -1,21 +1,8 @@
-.touch-target {
-  min-height: 44px;
-  min-width: 44px;
-  padding: 8px;
-}
-
+/* touch-optimized: 触屏操作优化类 */
+.touch-pan-x { touch-action: pan-x; }
+.touch-pan-y { touch-action: pan-y; }
+.touch-pan { touch-action: pan-x pan-y; }
 .touch-optimized-modal {
-  margin: 16px;
-}
-
-@media (max-width: 768px) {
-  .touch-target {
-    min-height: 48px;
-    min-width: 48px;
-    padding: 12px;
-  }
-
-  .touch-optimized-modal {
-    margin: 8px;
-  }
+  /* 触屏 modal 触控目标尺寸 */
+  min-height: 44px;
 }

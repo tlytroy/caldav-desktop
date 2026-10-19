@@ -2,6 +2,30 @@
 
 这个文件记录了项目的持续更新和改进。每次更新都应该在这个文件中添加相关信息，而不是创建新的更新日志文件。
 
+## 2026-08-21
+
+### 工作台 ↔ 日历双向绑定 + 同步关联保留
+
+**双向绑定（单一事实源，两端互链）**
+
+- 工作台「任务看板」与日历通过轻量引用字段互链：看板任务行尾 `| 日历:<uid>`（`KanbanTodo.calendarEventUid`），events.md 事件 `kanbanTaskId` YAML 字段。
+- 后端 `routes/kanban.ts` 重写：`POST /task` 可带 `calendar` 同步建事件；`PATCH /task/:id` 支持建/改绑定或 `clearCalendar`；`DELETE` 级联删事件；新增 `POST /task/:id/unlink-calendar`（仅解绑保留两边）。
+- 后端 `routes/md-bridge.ts`：`POST /events/add` 可带 `kanban` 同步建任务；`DELETE /events/:uid` 级联删任务；新增 `PUT /events/:uid` 更新事件时强制保留 `kanbanTaskId`。
+- 前端：任务表单「📅 同时加入日历」、事件表单「📋 同时加入任务看板」、删除级联勾选、防重复显示（带 `calendarEventUid` 的任务从日历外部事件过滤）。
+
+**Bug 修复：拉取同步不再清空绑定**
+
+- 修复 `POST /api/md-bridge/sync/caldav` 的 pull 分支：原先用远端 ICS 整条覆盖本地事件，导致 `kanbanTaskId` 被清空（原注释写「目前用远程覆盖本地」）。现改为优先采用远程 ICS 的 `X-KANBAN-TASK-ID`，否则回退保留本地 `kanbanTaskId`。
+- `md-ics-bridge.ts`：`eventToIcs` 写出 `X-KANBAN-TASK-ID:<id>` 扩展属性；`icsToEvent` 解析该属性回填 `kanbanTaskId`。使 push→CalDAV→pull 往返也能保留工作台↔日历绑定。
+- 纯 Node 单测验证：5 项断言全部通过（写出 / 还原 / 远端携带保留 / 无 X 回退本地）。
+
+**文档**
+
+- 更新 `REF/MD_ICS_BRIDGE.md`：补充双向绑定章节、关联保留语义、X-KANBAN-TASK-ID 约定、API 表与实现计划勾选。
+- 更新 `docs/SYNC_MANAGEMENT.md`：新增「MD Bridge Sync」章节。
+- 更新 `README.md`：Features 增加双向绑定，配置段增加 `MD_ICS_*` / `KANBAN_FILE_PATH` 环境变量，新增「工作台集成（events.md 单一事实源）」说明。
+- **补上延时自动同步后端定时器**：`md-bridge.ts` 抽出 `performCaldavSync` 供手动与定时共用；按 `MD_ICS_AUTO_SYNC_MINUTES` 启动 `setInterval` 触发双向同步（仅当 `MD_ICS_ENABLED=true` 且间隔>0）。此前该配置项已就位但无消费方，延时自动同步实际未生效。
+
 ## 2026-08-19
 
 ### MD↔ICS 桥接引擎：完整端到端实现

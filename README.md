@@ -15,6 +15,11 @@ Built with the help of AI assistance, this project addresses the lack of standal
   - Manual sync button for immediate updates
   - Sync status visualization in bottom status bar
   - Immediate frontend feedback with background synchronization
+- **iCalendar 文件导入 / 导出**:
+  - 导入任意 `.ics`（Google / Outlook / Apple 导出）到 events.md，支持先预览再确认
+  - 按 uid 去重，重复导入不会产生重复事件
+  - 可选择追加（append）或替换（replace）两种模式
+  - 导出 events.md 为单个 `.ics` 文件，可按日期范围过滤
 - **Event Management**: Create, edit, delete events with full CRUD operations
   - Enhanced delete functionality with robust error handling
   - Graceful handling of network issues and server errors
@@ -28,7 +33,8 @@ Built with the help of AI assistance, this project addresses the lack of standal
   - Unified rounded corner design system
   - Full dark mode support
   - Responsive layout
-- **Cross-Platform**: Linux, Windows, macOS (packaged as Electron app)
+- **Cross-Platform**: Linux, Windows, macOS (packaged as Electron app), Android (Capacitor)
+- **Workbench Integration (双向绑定)**: 任务看板与日历事件通过 `events.md` 单一事实源互链，可双向一键创建、级联删除、解绑保留；ICS 仅作非实时同步通道（延时自动 + 手动同步）
 
 ## 🚀 Quick Start
 
@@ -62,7 +68,22 @@ Create `.env` file in project root:
 RADICALE_URL=https://your-radicale-server.com
 RADICALE_USERNAME=your_username
 RADICALE_PASSWORD=your_password
+
+# MD↔ICS 桥接（events.md 单一事实源；设为 true 开启）
+MD_ICS_ENABLED=true
+MD_EVENTS_FILE=./events.md
+MD_ICS_SYNC_DIRECTION=bidirectional   # push | pull | bidirectional
+MD_ICS_AUTO_SYNC_MINUTES=0             # >0 启用延时自动同步（非实时）
+KANBAN_FILE_PATH=./工作搭子看板.md      # 工作台任务看板文件路径
 ```
+
+## 🔗 工作台集成（events.md 单一事实源）
+
+工作台「任务看板」与日历共享同一个 `events.md` 作为唯一事实源（设计见 `REF/MD_ICS_BRIDGE.md`）：
+
+- 在任务看板加任务时可勾选「同时加入日历」并填日期/时间；在日历加事件时可勾选「同时加入任务看板」。
+- 两端通过 `日历:<uid>`（看板任务行）/ `kanbanTaskId`（events.md 事件）互链，删除时可级联或仅解绑。
+- ICS 不是首屏数据源，只是同步通道：通过延时自动同步（`MD_ICS_AUTO_SYNC_MINUTES`）或 UI 的「推送/拉取/双向同步」按钮进行非实时同步；拉取时保留本地绑定，不会打掉双向关联。
 
 ## 📦 Builds
 
@@ -113,15 +134,22 @@ pnpm package:mac
 
 ## 🧪 Testing
 
-### Automated API Tests
+### Automated Tests
 
 ```bash
-./run-tests.sh
+cd apps/server && pnpm test
 ```
 
-This script runs 9 comprehensive tests covering all backend functionality.
+### Test Coverage
 
-**Test Results: 9/9 PASSING (100%)**
+Current automated tests (`apps/server/src/__tests__/`):
+
+| Test file | What it locks down |
+| --------- | ------------------ |
+| `ics-file.test.ts` | 多事件 `.ics` 解析、全天事件 DTEND 排他、本地日历日不跨时区、导出→导入往返一致、异常输入不崩 |
+| `kanban-id.test.ts` | 任务 id 持久化、**新增任务不导致存量 id 行序漂移**、旧格式文件兼容、项目/速记往返 |
+
+Tests that require a live CalDAV server (`caldav.test.ts`, `e2e-bridge.test.ts`, `e2e-full.test.ts`) need `CALDAV_URL` / `CALDAV_USER` / `CALDAV_PASS` configured in `.env`; they are not part of the offline suite.
 
 ### Manual Frontend Tests
 
@@ -133,20 +161,6 @@ cd apps/renderer && pnpm dev    # Terminal 2
 ```
 
 Then visit http://localhost:5173/ in your browser.
-
-## Test Coverage
-
-### Backend API Tests (9/9 Passing)
-
-1. List calendars from Radicale server
-2. Fetch events from calendar
-3. Create new event
-4. Update existing event
-5. Delete event
-6. Handle event categories
-7. Process event tags
-8. Manage recurring events
-9. Support all-day events
 
 ## 📊 Changelog
 
@@ -280,45 +294,49 @@ radicale-desktop/
 
 ## 🔄 Roadmap
 
+> 状态说明：`[x]` = 代码已实现且有测试覆盖；`[~]` = 部分实现或有已知限制；`[ ]` = 未实现。
+> 标 `[~]` 的条目不要当成可用功能。
+
 ### v0.2.0 — 积木式模块化重构
 
-- [ ] **Phase 1: 框架搭建**
-  - [ ] 创建 framework/ 核心框架 (ModuleRegistry, ModuleSlot, AppRouter)
-  - [ ] 实现占位模块系统
-  - [ ] 实现工作台 Dashboard 页面
-- [ ] **Phase 2: 模块化改造**
-  - [ ] 重构 calendar 为独立模块
-  - [ ] 重构 sync 为独立模块 (双通道: CalDAV + WebDAV)
-  - [ ] 重构 settings 为独立模块
-  - [ ] 重构 roadmap 为独立模块
-- [ ] **Phase 3: WebDAV 同步 + MD 文件管理**
-  - [ ] 实现 WebDAV 客户端 (MD 文件层同步)
-  - [ ] 实现本地 MD 文件存储/读取服务
-  - [ ] 实现同步控制器 (SyncController: 自动/手动/变化监听)
-  - [ ] 实现一键同步按钮 (转换 + 双通道推送)
-  - [ ] 实现可配置同步间隔 (5/10/30分钟/手动)
-- [ ] **Phase 4: MD ↔ ICS 中转系统**
-  - [ ] 实现 Markdown 解析器 (frontmatter + 内容)
-  - [ ] 实现 MD → ICS 转换器
-  - [ ] 实现 ICS → MD 反向转换器
-  - [ ] 实现 CalDAV 同步桥接 (通道 A)
-- [ ] **Phase 5: 占位模块**
-  - [ ] todos 占位模块
-  - [ ] contacts 占位模块
-  - [ ] notes 占位模块
-  - [ ] analytics 占位模块
-- [ ] **Phase 6: work-dazi 桥接**
-  - [ ] 看板 ↔ 日程双向同步
-  - [ ] AI Agent 写入能力集成
+- **Phase 1: 框架搭建**
+  - [x] 创建 framework/ 核心框架 (ModuleRegistry, ModuleSlot, AppRouter)
+  - [x] 实现占位模块系统
+  - [x] 实现工作台 Dashboard 页面
+- **Phase 2: 模块化改造**
+  - [x] calendar / tasks / dashboard 三个活跃模块注册
+  - [x] 旧 AppShell 保留为回退路径（`useModularUI` 开关）
+  - [ ] settings 独立成模块（当前仍是 SettingsModal 组件）
+  - [ ] roadmap 独立成模块
+- **Phase 3: MD 文件层**
+  - [x] events.md 读写（YAML frontmatter）
+  - [x] 工作搭子看板.md 读写（待办 / 项目 / 速记）
+  - [x] iCalendar 文件导入（多事件、dryRun 预览、按 uid 去重）
+  - [x] iCalendar 文件导出（单文件 VCALENDAR、可按日期范围过滤）
+  - [ ] WebDAV 通道（`.env` 里已预留 `WEBDAV_*` 变量，**代码尚未实现**）
+- **Phase 4: CalDAV 同步**
+  - [x] MD → ICS 转换
+  - [x] push / pull / 双向同步，pull 保留本地 `kanbanTaskId`
+  - [x] 延时自动同步（`MD_ICS_AUTO_SYNC_MINUTES`）
+  - [x] 同步方向枚举归一化（`md-to-caldav` / `push` 等表述统一）
+  - [~] 增量同步：目前按全量 events 遍历，未做 `updated` 级增量
+  - [~] 冲突检测：仅基于 `updated` 时间戳的基础版
+- **Phase 5: 双向绑定**
+  - [x] 任务 ↔ 事件互链（看板 `日历:<uid>` ↔ events.md `kanbanTaskId`）
+  - [x] 级联删除 / 解绑保留
+  - [x] `X-KANBAN-TASK-ID` 扩展属性保证同步往返不丢关联
+- **Phase 6: 占位模块**
+  - [ ] git-sync 占位模块（模块已注册，路由到通用占位页）
+  - [ ] ai-agent 占位模块（`.env` 里 `AI_*` 全是死配置，无代码读取）
+  - [ ] notifications 占位模块
 
 ### v0.3.0+ (规划中)
 
-- Windows/macOS packaging improvements
-- Advanced filtering & event search
-- Offline mode enhancements
-- Multiple CalDAV account support
-- Meeting invitations
-- Complex timezone handling
+- 自然语言快速创建事件（类 Fantastical 交互）
+- AI 从笔记提取事件
+- 多 CalDAV 账号支持
+- 离线模式增强
+- Android 端适配（**架构前提**：md 读写与同步核心需下沉到渲染层或改用 Capacitor 插件，因为移动端没有 Node 后端）
 
 ## 📄 License
 

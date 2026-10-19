@@ -212,6 +212,12 @@ cd apps/renderer && pnpm dev    # Terminal 2
 
 ## 📝 Recent Updates
 
+### August 21, 2026 - 工作台↔日历双向绑定 + 同步关联保留
+
+- **双向绑定**：工作台任务与日历事件通过 `日历:<uid>` / `kanbanTaskId` 互链，可双向一键创建、级联删除、解绑保留
+- **同步修复**：拉取（CalDAV→MD）不再清空绑定；ICS 用 `X-KANBAN-TASK-ID` 携带关联，pull 合并回退保留本地关联
+- **数据架构**：`events.md` 为唯一事实源，ICS 仅作非实时同步通道（延时自动 + 手动同步）
+
 ### June 30, 2026 - Documentation Consolidation
 
 - **文档整理**: 合并并删除了冗余的文档文件

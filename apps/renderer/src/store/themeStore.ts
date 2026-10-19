@@ -87,13 +87,17 @@ export const getCurrentColorScheme = (state: ThemeState): ColorScheme => {
   return morandiSchemes[state.colorScheme] || morandiSchemes.classic;
 };
 
-// 获取当前颜色值（用于CSS变量）
+// 获取当前颜色值（用于CSS变量）。
+// 关键：变量名必须与 Tailwind `colors.primary/secondary/accent/neutral` 的
+// `var(--color-*)` 区分开。否则一旦注入，所有引用这些工具类的组件都会被刷成
+// 莫兰迪色（之前整页变成深褐/墨绿就是这个原因）。改用 --app-color-* 前缀，
+// 再由 index.css 的 @theme inline 把这些变量映射到 bg-brand/text-brand-accent。
 export const getCurrentColors = (state: ThemeState): Record<string, string> => {
   const scheme = getCurrentColorScheme(state);
   return {
-    '--color-primary': scheme.primary,
-    '--color-secondary': scheme.secondary,
-    '--color-accent': scheme.accent,
-    '--color-neutral': scheme.neutral
+    "--app-color-primary": scheme.primary,
+    "--app-color-secondary": scheme.secondary,
+    "--app-color-accent": scheme.accent,
+    "--app-color-neutral": scheme.neutral,
   };
 };

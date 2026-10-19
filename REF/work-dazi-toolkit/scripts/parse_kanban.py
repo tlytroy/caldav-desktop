@@ -65,6 +65,10 @@ def parse_kanban(path):
                     "text": text,
                     "priority": prio,
                     "done": done,
+                    # id / 日历 是 CalDAV Desktop 主项目写入的字段（2026-10-19 起）。
+                    # 缺失时保持空字符串，由下方 fallback 生成行序 id。
+                    "id": fields.get("id", ""),
+                    "calendar_uid": fields.get("日历", ""),
                     "due": fields.get("截止", ""),
                     "est": fields.get("预估", ""),
                     "project": fields.get("项目", ""),
@@ -92,6 +96,13 @@ def parse_kanban(path):
             txt = re.sub(r"#([^\s#]+)", "", body).strip()
             if txt:
                 notes.append({"text": txt, "tags": tags})
+
+    # 行序 id 回退：老文件没有 id 字段时补 t0/t1/...，与主项目 parseKanban 行为一致。
+    # 仅用于读取兼容，不要用它持久化——行序会随增删漂移。
+    for i, t in enumerate(tasks):
+        if not t["id"]:
+            t["id"] = "t%d" % i
+
     return {"tasks": tasks, "projects": projects, "notes": notes}
 
 

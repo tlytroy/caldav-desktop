@@ -46,6 +46,8 @@ export interface BridgeEvent {
   description?: string;
   updated?: string; // ISO 8601
   source?: "caldav" | "md" | "ai";
+  /** 关联的工作搭子任务 ID（双向绑定：任务看板那边的对应任务的 id） */
+  kanbanTaskId?: string;
 }
 
 /** events.md 完整内容（frontmatter + body） */
@@ -212,6 +214,10 @@ function setEventField(
     case "source":
       event.source = value as BridgeEvent["source"];
       break;
+    case "kanbanTaskId":
+    case "kanban":
+      event.kanbanTaskId = value || undefined;
+      break;
   }
 }
 
@@ -253,6 +259,9 @@ export function serializeEventsFile(eventsFile: EventsFile): string {
     }
     if (event.source) {
       yamlLines.push(`    source: "${event.source}"`);
+    }
+    if (event.kanbanTaskId) {
+      yamlLines.push(`    kanbanTaskId: "${event.kanbanTaskId}"`);
     }
   }
 
@@ -342,19 +351,32 @@ export function eventToIcs(event: BridgeEvent): string {
 
   const startDate = new Date(event.date);
   let endDate: Date;
-  if (event.end) {
+  if (event.allDay) {
+    // 全天事件：ICS 的 DTEND 是排他边界，必须 ≥ 次日 00:00。
+    // 历史数据里存在 end == start 的全天事件，直接导出会得到零长度事件、
+    // 客户端可能完全不显示，这里统一兜底为次日。
+    const base = event.end ? new Date(event.end) : new Date(startDate);
+    endDate = base.getTime() > startDate.getTime() ? base : new Date(startDate.getTime() + 86400000);
+  } else if (event.end) {
     endDate = new Date(event.end);
-  } else if (event.allDay) {
-    // All-day: DTEND is exclusive (next day)
-    endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + 1);
+    // 结束时间不晚于开始 → 兜底 +1 小时
+    if (endDate.getTime() <= startDate.getTime()) {
+      endDate = new Date(startDate.getTime() + 3600000);
+    }
   } else {
     endDate = new Date(startDate.getTime() + 3600000);
   }
 
   const formatDate = (d: Date, allDay?: boolean): string => {
     if (allDay) {
-      return d.toISOString().slice(0, 10).replace(/-/g, "");
+      // 全天事件的 VALUE=DATE 就是"日历上的那一天"，不含时区。
+      // 不能用 toISOString()（会按 UTC 换算，东八区凌晨的事件会落到前一天），
+      // 也不应直接用本地值 —— 因为 startDate 可能本身就是从 UTC 串解析来的。
+      // 这里统一按本地日历日取年月日。
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}${m}${day}`;
     }
     return d.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
   };
@@ -422,6 +444,11 @@ export function eventToIcs(event: BridgeEvent): string {
     );
   }
 
+  // 关联工作搭子任务（非 ICS 标准字段，用 X- 扩展属性保留双向绑定，确保 push→CalDAV→pull 往返不丢）
+  if (event.kanbanTaskId) {
+    lines.push(`X-KANBAN-TASK-ID:${event.kanbanTaskId}`);
+  }
+
   lines.push("END:VEVENT", "END:VCALENDAR");
   return lines.join("\r\n");
 }
@@ -469,11 +496,9 @@ export function icsToEvent(icsContent: string): BridgeEvent | null {
   const dtstartMatch = block.match(/^DTSTART(?:;VALUE=DATE)?:(.+)$/m);
   if (dtstartMatch) {
     const val = dtstartMatch[1].trim();
-    if (val.length === 8 && /^\d{8}$/.test(val)) {
-      const y = val.slice(0, 4);
-      const m = val.slice(4, 6);
-      const d = val.slice(6, 8);
-      event.date = `${y}-${m}-${d}T00:00:00.000Z`;
+    if (/^\d{8}$/.test(val)) {
+      // VALUE=DATE 不含时区，按本地零点解析，保留"日历上的那一天"
+      event.date = `${val.slice(0, 4)}-${val.slice(4, 6)}-${val.slice(6, 8)}T00:00:00`;
       event.allDay = true;
     } else {
       event.date = val
@@ -494,11 +519,8 @@ export function icsToEvent(icsContent: string): BridgeEvent | null {
   const dtendMatch = block.match(/^DTEND(?:;VALUE=DATE)?:(.+)$/m);
   if (dtendMatch) {
     const val = dtendMatch[1].trim();
-    if (val.length === 8 && /^\d{8}$/.test(val)) {
-      const y = val.slice(0, 4);
-      const m = val.slice(4, 6);
-      const d = val.slice(6, 8);
-      event.end = `${y}-${m}-${d}T00:00:00.000Z`;
+    if (/^\d{8}$/.test(val)) {
+      event.end = `${val.slice(0, 4)}-${val.slice(4, 6)}-${val.slice(6, 8)}T00:00:00`;
     } else {
       event.end = val
         .replace(
@@ -562,6 +584,66 @@ export function icsToEvent(icsContent: string): BridgeEvent | null {
     }
   }
 
+  // X-KANBAN-TASK-ID → 关联的工作搭子任务 ID（自定义扩展属性）
+  const kanbanMatch = block.match(/^X-KANBAN-TASK-ID:(.+)$/m);
+  if (kanbanMatch) {
+    event.kanbanTaskId = kanbanMatch[1].trim() || undefined;
+  }
+
   if (!event.title) return null;
   return event as BridgeEvent;
+}
+
+/**
+ * 解析包含多个 VEVENT 的完整 .ics 文件。
+ *
+ * 现状：`icsToEvent` 只取第一个 VEVENT（正则不带 g 标志），所以导入一份
+ * 从 Google/Outlook/Apple 导出的日历文件时，只会得到一条事件。
+ * 导入功能必须基于这个函数。
+ *
+ * @returns 解析出的事件列表；无法识别的条目跳过
+ */
+export function parseIcsFile(icsContent: string): BridgeEvent[] {
+  const normalized = icsContent.replace(/\r\n/g, "\n");
+  const results: BridgeEvent[] = [];
+  const re = /BEGIN:VEVENT\n([\s\S]*?)END:VEVENT/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(normalized)) !== null) {
+    const block = m[1];
+    // 复用单事件解析逻辑，保证导入与 CalDAV 拉取行为一致
+    const evt = icsToEvent(`BEGIN:VEVENT\n${block}END:VEVENT`);
+    if (evt && evt.title) results.push(evt);
+  }
+  return results;
+}
+
+/**
+ * 把多个事件导出为单个 .ics 文件（VCALENDAR 包裹）。
+ *
+ * 现状：events.md 里已有 `allEventsToIcs` 返回 Map<uid, ics>，
+ * 但那是给"每个事件存一个 .ics 文件"的 CalDAV 用法，
+ * 与"导出成一个文件给别的日历软件导入"是两回事。
+ *
+ * @returns 完整的 VCALENDAR 文本
+ */
+export function eventsFileToIcs(eventsFile: EventsFile): string {
+  const parts: string[] = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//CalDAV Desktop//MD Bridge Export//ZH",
+    "CALSCALE:GREGORIAN",
+  ];
+  for (const event of eventsFile.events) {
+    // eventToIcs 自带 VCALENDAR 包裹，这里剥掉外层，只留 VEVENT
+    const single = eventToIcs(event);
+    const vevent = single
+      .replace(/^BEGIN:VCALENDAR\r?\n?/, "")
+      .replace(/VERSION:2\.0\r?\n?/, "")
+      .replace(/PRODID:[^\r\n]*\r?\n?/, "")
+      .replace(/END:VCALENDAR\s*$/, "")
+      .trim();
+    if (vevent) parts.push(vevent);
+  }
+  parts.push("END:VCALENDAR");
+  return parts.join("\r\n") + "\r\n";
 }

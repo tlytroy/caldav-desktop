@@ -29,7 +29,7 @@ export function AppLayout({ sidebar, header, children }: AppLayoutProps) {
             <h1 className="text-lg font-bold text-gray-900 dark:text-white hidden lg:block">
               CalDAV
             </h1>
-            <h1 className="text-lg font-bold text-indigo-600 lg:hidden">C</h1>
+            <h1 className="text-lg font-bold text-brand lg:hidden">C</h1>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -83,7 +83,7 @@ function NavItemButton({ item }: { item: NavItem }) {
         ${isPlaceholder
           ? "text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-50"
           : isActive
-            ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400"
+            ? "bg-brand/10 dark:bg-brand/20 text-brand"
             : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-neutral-700"
         }
       `}

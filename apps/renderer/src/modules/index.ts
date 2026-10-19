@@ -1,5 +1,5 @@
 import React from "react";
-import { Calendar, GitBranch, Bell, BrainCircuit } from "lucide-react";
+import { Calendar, GitBranch, Bell, BrainCircuit, ListTodo } from "lucide-react";
 import type { CalendarModule } from "../framework";
 
 /**
@@ -55,7 +55,7 @@ const CalendarModule: CalendarModule = {
   description: "CalDAV 日历事件管理，支持多日历、事件 CRUD、同步",
   icon: React.createElement(Calendar, { className: "w-5 h-5" }),
   status: "active",
-  order: 1,
+  order: 2,
   routes: [
     {
       path: "/calendar",
@@ -74,6 +74,33 @@ const CalendarModule: CalendarModule = {
   ],
 };
 
+// ---- Tasks - 任务看板模块（活跃，工作搭子集成） ----
+const TasksModule: CalendarModule = {
+  id: "tasks",
+  name: "任务",
+  version: "1.0.0",
+  description: "工作搭子任务看板：添加/勾选任务，并与日历双向集成",
+  icon: React.createElement(ListTodo, { className: "w-5 h-5" }),
+  status: "active",
+  order: 1,
+  routes: [
+    {
+      path: "/tasks",
+      component: React.lazy(() => import("./tasks")),
+      title: "任务",
+      showInNav: true,
+    },
+  ],
+  navItems: [
+    {
+      id: "nav-tasks",
+      label: "任务",
+      icon: React.createElement(ListTodo, { className: "w-5 h-5" }),
+      path: "/tasks",
+    },
+  ],
+};
+
 // ---- GitSync - 多通道同步模块（占位） ----
 const GitSyncModule: CalendarModule = {
   id: "git-sync",
@@ -82,7 +109,7 @@ const GitSyncModule: CalendarModule = {
   description: "WebDAV + Git 双通道同步日历数据，支持自建服务器与 GitHub",
   icon: React.createElement(GitBranch, { className: "w-5 h-5" }),
   status: "placeholder",
-  order: 2,
+  order: 3,
   placeholder: {
     title: "多通道同步",
     description:
@@ -117,7 +144,7 @@ const AIAgentModule: CalendarModule = {
   description: "接入 AI API，自动从 Obsidian 笔记提取事件，生成日历任务",
   icon: React.createElement(BrainCircuit, { className: "w-5 h-5" }),
   status: "placeholder",
-  order: 3,
+  order: 4,
   placeholder: {
     title: "AI 智能助手",
     description:
@@ -152,7 +179,7 @@ const NotificationsModule: CalendarModule = {
   description: "日历事件提醒，支持企业微信、邮箱、Server酱等多渠道推送",
   icon: React.createElement(Bell, { className: "w-5 h-5" }),
   status: "placeholder",
-  order: 4,
+  order: 5,
   placeholder: {
     title: "通知推送",
     description:
@@ -182,6 +209,7 @@ const NotificationsModule: CalendarModule = {
 // ---- 全部模块列表 ----
 export const allModules: CalendarModule[] = [
   DashboardModule,
+  TasksModule,
   CalendarModule,
   GitSyncModule,
   AIAgentModule,

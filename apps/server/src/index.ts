@@ -4,6 +4,7 @@ import cors from "cors";
 import { initializeClient } from "./caldav.js";
 import { calendarRouter } from "./routes/calendar.js";
 import { mdBridgeRouter } from "./routes/md-bridge.js";
+import { kanbanRouter } from "./routes/kanban.js";
 import { loadBridgeConfig } from "./md-ics-bridge.js";
 
 const app = express();
@@ -22,6 +23,9 @@ app.use("/api/calendar", calendarRouter);
 
 // MD ↔ ICS Bridge routes
 app.use("/api/md-bridge", mdBridgeRouter);
+
+// 工作搭子看板 (Kanban) routes
+app.use("/api/kanban", kanbanRouter);
 
 async function start() {
   try {

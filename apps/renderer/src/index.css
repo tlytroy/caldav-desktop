@@ -1,3 +1,32 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
+/* v4 用 class 切换暗色模式（原 v3 的 darkMode: "class" 在 v4 由该指令接管） */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * 品牌色 token：映射到运行时由 themeStore 注入的 CSS 变量（--app-color-primary 等）。
+ * 注意：注入变量名是 --app-color-*（不带 --color- 前缀），是为了避免与 Tailwind
+ * 默认主题里 `colors.primary = var(--color-primary)` 冲突——之前用 --color-*
+ * 导致整个页面被刷成莫兰迪色。
+ * 用 @theme inline 让工具类（bg-brand / text-brand-accent ...）直接引用运行时变量。
+ */
+@theme inline {
+  --color-brand: var(--app-color-primary);
+  --color-brand-soft: var(--app-color-secondary);
+  --color-brand-accent: var(--app-color-accent);
+  --color-brand-neutral: var(--app-color-neutral);
+}
+
+/* 让持久化的圆角变量也能被工具类引用（--radius 由 themeStore 设置） */
+@theme inline {
+  --radius-widget: var(--radius, 0.5rem);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}

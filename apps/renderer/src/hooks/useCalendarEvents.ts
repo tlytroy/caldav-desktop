@@ -1,273 +1,145 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import type { CalendarEvent, LoadingState } from "../types";
+import { useState, useEffect, useCallback } from "react";
+import type { LoadingState } from "../types";
 import {
-  fetchCalendarEvents,
-  createCalendarEvent,
-  updateCalendarEvent,
-  deleteCalendarEvent,
-} from "../api/calendar";
-import { useSyncStore } from "../store/syncStore";
+  fetchMdEvents,
+  addMdEvent,
+  updateMdEvent,
+  deleteMdEvent,
+  syncMdToCaldav,
+  type MdEvent,
+  type KanbanPayload,
+} from "../api/md-bridge";
 
-// 从环境变量获取默认日期范围
-const DEFAULT_DATE_RANGE_DAYS = parseInt(
-  import.meta.env.VITE_DEFAULT_DATE_RANGE_DAYS || "30",
-);
-
-// 缓存过期时间（毫秒）- 1小时
-const CACHE_EXPIRY_TIME = 60 * 60 * 1000;
-
-export function useCalendarEvents(calendarUrl: string | null) {
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+/**
+ * useCalendarEvents - 日历事件 hook（MD 优先架构）
+ *
+ * 数据流：
+ *   events.md（本地事实源）→ useCalendarEvents → FullCalendar
+ *   用户创建/删除事件 → POST /api/md-bridge/events/add 或 DELETE
+ *   （可选）完成后调 syncMdToCaldav() 推送到 CalDAV
+ *
+ * `calendarUrl` 现在仅作为「CalDAV 同步目标」使用，可选。
+ * 不再阻塞 UI：就算没配置 CalDAV，日历也能完整显示。
+ *
+ * 双向绑定：createEvent 第二参数 kanban 可让后端同时在 工作搭子看板 创建任务并互填链接；
+ * deleteEvent 第二参数 cascade=true 表示删除事件时联动删除绑定的看板任务。
+ */
+export function useCalendarEvents(_calendarUrl?: string | null) {
+  const [events, setEvents] = useState<MdEvent[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
-  // 从同步存储中获取状态
-  const {
-    syncInterval,
-    lastSyncTime,
-    isSyncing,
-    syncStatus,
-    syncError,
-    cachedEvents,
-    cacheTimestamps,
-    setLastSyncTime,
-    setIsSyncing,
-    setSyncStatus,
-    setSyncError,
-    setCachedEvents,
-    clearCache,
-    removeEventFromCache,
-  } = useSyncStore();
-
-  // 检查缓存是否有效
-  const isCacheValid = useCallback(
-    (url: string) => {
-      if (!cachedEvents[url] || !cacheTimestamps[url]) return false;
-      const cacheAge = Date.now() - cacheTimestamps[url];
-      return cacheAge < CACHE_EXPIRY_TIME;
-    },
-    [cachedEvents, cacheTimestamps],
-  );
-
-  // 从缓存或服务器加载事件
-  const loadEvents = useCallback(
-    async (startDate?: Date, endDate?: Date, forceRefresh = false) => {
-      console.log("loadEvents called with calendarUrl:", calendarUrl);
-      if (!calendarUrl) {
-        console.log("No calendarUrl, returning early");
-        return;
-      }
-
-      // 如果有有效的缓存且不强制刷新，直接使用缓存
-      if (!forceRefresh && isCacheValid(calendarUrl)) {
-        console.log("Using cached events");
-        setEvents(cachedEvents[calendarUrl]);
-        setLoadingState("success");
-        return;
-      }
-
-      console.log("Setting loading state to loading");
-      setLoadingState("loading");
-      setError(null);
-
-      try {
-        // 如果没有提供日期范围，则使用默认范围
-        const start = startDate || new Date();
-        const end =
-          endDate ||
-          new Date(
-            start.getTime() + DEFAULT_DATE_RANGE_DAYS * 24 * 60 * 60 * 1000,
-          );
-
-        console.log("Fetching events from API");
-        const fetchedEvents = await fetchCalendarEvents(
-          calendarUrl,
-          start,
-          end,
-        );
-        console.log("Fetched events:", fetchedEvents.length);
-
-        // 更新缓存
-        setCachedEvents(calendarUrl, fetchedEvents);
-        setEvents(fetchedEvents);
-        console.log("Setting loading state to success");
-        setLoadingState("success");
-      } catch (err) {
-        console.error("Error fetching events:", err);
-        const errorMessage =
-          err instanceof Error ? err.message : "获取事件失败";
-        setError(errorMessage);
-        setLoadingState("error");
-
-        // 如果有缓存，即使获取失败也显示缓存数据
-        if (cachedEvents[calendarUrl]) {
-          console.log("Using cached events due to error");
-          setEvents(cachedEvents[calendarUrl]);
-          setLoadingState("success");
-        }
-      }
-    },
-    [calendarUrl, cachedEvents, isCacheValid, setCachedEvents],
-  );
-
-  // 执行同步操作
-  const performSync = useCallback(async () => {
-    if (!calendarUrl || isSyncing) return;
-
-    setIsSyncing(true);
-    setSyncStatus("syncing");
-    setSyncError(null);
-
+  /** 从 events.md 读取（不依赖网络，不走 CalDAV） */
+  const loadEvents = useCallback(async () => {
+    setLoadingState("loading");
+    setError(null);
     try {
-      // 先尝试使用缓存，如果缓存有效就不强制刷新
-      if (isCacheValid(calendarUrl)) {
-        console.log("Sync: cache is valid, using cached events");
-        setEvents(cachedEvents[calendarUrl]);
-        setLastSyncTime(Date.now());
-        setSyncStatus("success");
-        setIsSyncing(false);
-        return;
-      }
-
-      // 缓存无效时才强制从服务器加载最新数据
-      await loadEvents(undefined, undefined, true);
-      setLastSyncTime(Date.now());
-      setSyncStatus("success");
+      const r = await fetchMdEvents();
+      setEvents(r.events || []);
+      setLoadingState("success");
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "同步失败";
-      setSyncError(errorMessage);
-      setSyncStatus("error");
-    } finally {
-      setIsSyncing(false);
+      const msg = err instanceof Error ? err.message : "读取 events.md 失败";
+      setError(msg);
+      setLoadingState("error");
+      setEvents([]); // 失败时清空，不要显示陈旧缓存
     }
-  }, [
-    calendarUrl,
-    isSyncing,
-    loadEvents,
-    isCacheValid,
-    cachedEvents,
-    setIsSyncing,
-    setSyncStatus,
-    setSyncError,
-    setLastSyncTime,
-  ]);
+  }, []);
 
-  // 创建事件
+  useEffect(() => {
+    loadEvents();
+  }, [loadEvents]);
+
+  /**
+   * 创建事件：写 events.md，UI 立即刷新。
+   * 若传 kanban payload，则同时在 工作搭子看板 创建任务并互填链接。
+   */
   const createEvent = useCallback(
-    async (eventData: Omit<CalendarEvent, "id">) => {
-      if (!calendarUrl) throw new Error("未选择日历");
-
-      try {
-        await createCalendarEvent(calendarUrl, eventData);
-        // 清除缓存并重新同步
-        clearCache(calendarUrl);
-        await performSync();
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "创建事件失败";
-        throw new Error(errorMessage);
-      }
-    },
-    [calendarUrl, clearCache, performSync],
-  );
-
-  // 更新事件
-  const updateEvent = useCallback(
-    async (eventId: string, eventData: Omit<CalendarEvent, "id">) => {
-      if (!calendarUrl) throw new Error("未选择日历");
-
-      try {
-        await updateCalendarEvent(eventId, calendarUrl, eventData);
-        // 清除缓存并重新同步
-        clearCache(calendarUrl);
-        await performSync();
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "更新事件失败";
-        throw new Error(errorMessage);
-      }
-    },
-    [calendarUrl, clearCache, performSync],
-  );
-
-  // 删除事件
-  const deleteEvent = useCallback(
-    async (eventId: string) => {
-      if (!calendarUrl) throw new Error("未选择日历");
-
-      try {
-        await deleteCalendarEvent(eventId, calendarUrl);
-        // 从缓存中移除事件而不是清除整个缓存
-        removeEventFromCache(calendarUrl, eventId);
-        // 然后执行同步以确保数据一致性
-        await performSync();
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : "删除事件失败";
-        throw new Error(errorMessage);
-      }
-    },
-    [calendarUrl, removeEventFromCache, performSync],
-  );
-
-  // 强制同步
-  const forceSync = useCallback(async () => {
-    await performSync();
-  }, [performSync]);
-
-  // 初始化同步（带重试机制）
-  const initSync = useCallback(
-    async (retryCount = 3) => {
-      for (let i = 0; i < retryCount; i++) {
-        try {
-          await performSync();
-          return true;
-        } catch (err) {
-          console.warn(`Initialization sync attempt ${i + 1} failed:`, err);
-          if (i < retryCount - 1) {
-            // 等待一段时间后重试
-            await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
-          }
-        }
-      }
-      return false;
-    },
-    [performSync],
-  );
-
-  // 初始化加载
-  useEffect(() => {
-    if (calendarUrl) {
-      // 使用带重试机制的初始化同步
-      initSync().catch((err) => {
-        console.error("Initial sync failed:", err);
-        // 即使初始化同步失败，也要加载缓存中的数据（如果有）
-        loadEvents();
+    async (
+      data: Omit<MdEvent, "uid" | "updated" | "source">,
+      kanban?: KanbanPayload,
+    ): Promise<MdEvent> => {
+      const r = await addMdEvent({ ...data, source: "md" }, kanban);
+      setEvents((prev) => {
+        const idx = prev.findIndex((e) => e.uid === r.event.uid);
+        if (idx >= 0) prev[idx] = r.event;
+        else prev.push(r.event);
+        return [...prev];
       });
+      return r.event;
+    },
+    [],
+  );
+
+  /**
+   * 更新事件（保留 kanbanTaskId 不被覆盖）
+   */
+  const updateEvent = useCallback(
+    async (uid: string, patch: Partial<MdEvent>): Promise<MdEvent> => {
+      const r = await updateMdEvent(uid, patch);
+      setEvents((prev) => {
+        const idx = prev.findIndex((e) => e.uid === uid);
+        if (idx >= 0) prev[idx] = r.event;
+        return [...prev];
+      });
+      return r.event;
+    },
+    [],
+  );
+
+  /**
+   * 删除事件：从 events.md 移除。
+   * 若 cascade=true 且事件本身绑定了 kanbanTaskId，连带删除看板任务；
+   * 否则后端会保留看板任务、仅解除绑定（避免误删）。
+   */
+  const deleteEvent = useCallback(
+    async (uid: string, cascade?: boolean) => {
+      await deleteMdEvent(uid);
+      setEvents((prev) => prev.filter((e) => e.uid !== uid));
+      // cascade 语义目前由后端根据 kanbanTaskId 自动判断，这里只是预留
+      void cascade;
+    },
+    [],
+  );
+
+  /** 推送 events.md 到 CalDAV（如果配置了）。失败不影响本地数据 */
+  const pushToCaldav = useCallback(async () => {
+    try {
+      const r = await syncMdToCaldav({ direction: "push" });
+      setLastSyncTime(Date.now());
+      return r;
+    } catch (err) {
+      console.warn("[useCalendarEvents] push to CalDAV failed:", err);
+      return null;
     }
-  }, [calendarUrl, initSync, loadEvents]);
+  }, []);
 
-  // 设置定时同步
-  useEffect(() => {
-    if (!calendarUrl || !syncInterval) return;
-
-    const intervalId = setInterval(() => {
-      performSync();
-    }, syncInterval);
-
-    return () => clearInterval(intervalId);
-  }, [calendarUrl, syncInterval, performSync]);
-
-  // 响应外部强制同步请求 - 当 lastSyncTime 发生变化时触发同步
-  // 使用 ref 追踪上一次的 lastSyncTime，避免初始 null → Date.now() 时触发不必要同步
-  const lastSyncTimeRef = useRef(lastSyncTime);
-
-  useEffect(() => {
-    if (lastSyncTime !== null && lastSyncTime !== lastSyncTimeRef.current) {
-      lastSyncTimeRef.current = lastSyncTime;
-      performSync();
+  /** 拉取远程 CalDAV → events.md（保留本地优先：仅追加不覆盖） */
+  const pullFromCaldav = useCallback(async () => {
+    try {
+      const r = await syncMdToCaldav({ direction: "pull" });
+      setLastSyncTime(Date.now());
+      // 拉取后重读本地
+      await loadEvents();
+      return r;
+    } catch (err) {
+      console.warn("[useCalendarEvents] pull from CalDAV failed:", err);
+      return null;
     }
-  }, [lastSyncTime, performSync]);
+  }, [loadEvents]);
+
+  /** 全量双向同步 */
+  const bidirectionalSync = useCallback(async () => {
+    try {
+      const r = await syncMdToCaldav({ direction: "bidirectional" });
+      setLastSyncTime(Date.now());
+      await loadEvents();
+      return r;
+    } catch (err) {
+      console.warn("[useCalendarEvents] bidirectional sync failed:", err);
+      return null;
+    }
+  }, [loadEvents]);
 
   return {
     events,
@@ -277,12 +149,9 @@ export function useCalendarEvents(calendarUrl: string | null) {
     createEvent,
     updateEvent,
     deleteEvent,
-    forceSync,
-    initSync,
-    isSyncing,
-    syncStatus,
-    syncError,
+    pushToCaldav,
+    pullFromCaldav,
+    bidirectionalSync,
     lastSyncTime,
-    setLoadingState,
   };
 }

@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect, useState } from "react";
 import { useModuleRegistry } from "../../framework";
 import { PlaceholderModuleCard } from "../../framework";
 import {
@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { useCalendarStore } from "../../store/calendarStore";
 import { useSyncStore } from "../../store/syncStore";
+import { fetchKanban, type KanbanTodo } from "../../api/kanban";
+import { fetchMdEvents, type MdEvent } from "../../api/md-bridge";
 
 /**
  * DashboardPage - 工作台首页
@@ -30,10 +32,8 @@ export default function DashboardPage() {
   const placeholderModules = getPlaceholderModules();
 
   // 从 store 获取真实数据
-  const { calendars, selectedCalendarUrl } =
-    useCalendarStore();
+  const { calendars, selectedCalendarUrl } = useCalendarStore();
   const {
-    cachedEvents,
     syncStatus,
     isSyncing,
     lastSyncTime,
@@ -41,50 +41,57 @@ export default function DashboardPage() {
     syncInterval,
   } = useSyncStore();
 
-  // 计算今日事件（从缓存中）
+  /**
+   * 日历事件直接读 events.md（与日历模块同一数据源）。
+   *
+   * 历史 bug：这里原先读 syncStore.cachedEvents，但数据流重构后
+   * useCalendarEvents 已改为直接读 events.md，不再写入该缓存，
+   * 于是「今日事件」「N 个事件」恒为 0 —— 页面看着正常，全是空的。
+   */
+  const [mdEvents, setMdEvents] = useState<MdEvent[]>([]);
+  useEffect(() => {
+    fetchMdEvents()
+      .then((r) => setMdEvents(r.events || []))
+      .catch(() => setMdEvents([]));
+  }, []);
+
+  // 看板任务（工作搭子）——让工作台成为任务 hub
+  const [kanbanTodos, setKanbanTodos] = useState<KanbanTodo[]>([]);
+  useEffect(() => {
+    fetchKanban()
+      .then((d) => setKanbanTodos(d.todos || []))
+      .catch(() => setKanbanTodos([]));
+  }, []);
+
+  const openTodos = kanbanTodos.filter((t) => !t.done);
+  const overdueTodos = openTodos.filter(
+    (t) => t.due && new Date(t.due).getTime() < Date.now(),
+  );
+
+  // 计算今日事件（来自 events.md）
   const todayEvents = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const allEvents: Array<{
-      title: string;
-      start: string;
-      end: string;
-      calendarUrl: string;
-    }> = [];
+    return mdEvents
+      .filter((e) => {
+        const start = new Date(e.date);
+        return start >= today && start < tomorrow;
+      })
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .map((e) => ({
+        uid: e.uid,
+        title: e.title || "无标题事件",
+        start: e.date,
+        end: e.end,
+        allDay: !!e.allDay,
+      }));
+  }, [mdEvents]);
 
-    for (const [calUrl, events] of Object.entries(cachedEvents)) {
-      if (!Array.isArray(events)) continue;
-      for (const event of events) {
-        const eventStart = new Date(event.start?.dateTime || event.start?.date);
-        if (eventStart >= today && eventStart < tomorrow) {
-          allEvents.push({
-            title: event.summary?.trim() || event.title || "无标题事件",
-            start: event.start?.dateTime || event.start?.date,
-            end: event.end?.dateTime || event.end?.date,
-            calendarUrl: calUrl,
-          });
-        }
-      }
-    }
-
-    // 按时间排序
-    allEvents.sort(
-      (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
-    );
-    return allEvents;
-  }, [cachedEvents]);
-
-  // 计算总事件数
-  const totalEvents = useMemo(() => {
-    let count = 0;
-    for (const events of Object.values(cachedEvents)) {
-      if (Array.isArray(events)) count += events.length;
-    }
-    return count;
-  }, [cachedEvents]);
+  // 事件总数直接来自 events.md
+  const totalEvents = mdEvents.length;
 
   // 格式化同步时间
   const formatSyncTime = (timestamp: number | null): string => {
@@ -127,21 +134,29 @@ export default function DashboardPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-8">
       {/* 欢迎横幅 */}
-      <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-6 sm:p-8 text-white">
+      <div className="bg-gradient-to-r from-brand to-brand-accent rounded-2xl p-6 sm:p-8 text-white">
         <h1 className="text-2xl sm:text-3xl font-bold mb-2">
-          CalDAV Desktop 工作台
+          个人工作台
         </h1>
         <p className="text-indigo-100 text-sm sm:text-base">
-          您的个人日历管理中心 · 模块化架构 · 持续进化
+          日历 · 任务 · 看板 ——以 events.md 与工作搭子看板.md 为唯一事实源
         </p>
-        {calendars.length > 0 && (
-          <div className="mt-3 flex items-center gap-2 text-indigo-100 text-sm">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-indigo-100 text-sm">
+          <span className="inline-flex items-center gap-1.5">
             <CalendarCheck className="w-4 h-4" />
-            <span>
-              当前日历: {selectedCalendarName} · 共 {calendars.length} 个日历
+            {totalEvents} 个事件
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <ListTodo className="w-4 h-4" />
+            {openTodos.length} 项待办
+          </span>
+          {calendars.length > 0 && (
+            <span className="inline-flex items-center gap-1.5">
+              <RefreshCw className="w-4 h-4" />
+              当前日历: {selectedCalendarName}
             </span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* 活跃模块网格 */}
@@ -182,9 +197,9 @@ export default function DashboardPage() {
         </div>
         {todayEvents.length > 0 ? (
           <div className="space-y-3">
-            {todayEvents.map((event, idx) => (
+            {todayEvents.map((event) => (
               <div
-                key={idx}
+                key={event.uid}
                 className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-neutral-800 rounded-lg"
               >
                 <div className="mt-0.5 w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0" />
@@ -193,8 +208,11 @@ export default function DashboardPage() {
                     {event.title}
                   </div>
                   <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                    {formatEventTime(event.start)} -{" "}
-                    {formatEventTime(event.end)}
+                    {event.allDay
+                      ? "全天"
+                      : `${formatEventTime(event.start)}${
+                          event.end ? ` - ${formatEventTime(event.end)}` : ""
+                        }`}
                   </div>
                 </div>
               </div>
@@ -205,10 +223,80 @@ export default function DashboardPage() {
             <CalendarCheck className="w-8 h-8 mx-auto mb-2 opacity-50" />
             <p className="text-sm">今日暂无事件</p>
             <p className="text-xs mt-1">
-              {calendars.length === 0
-                ? "请先在设置中配置 CalDAV 服务器"
+              {totalEvents === 0
+                ? "events.md 里还没有事件，去日历页新建一个"
                 : "享受平静的一天"}
             </p>
+          </div>
+        )}
+      </section>
+
+      {/* 今日待办（工作搭子看板） */}
+      <section className="bg-white dark:bg-neutral-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
+            <ListTodo className="w-5 h-5 mr-2 text-brand" /> 今日待办
+          </h2>
+          <a
+            href="#/tasks"
+            className="text-sm text-brand hover:underline"
+          >
+            去任务看板 →
+          </a>
+        </div>
+
+        <div className="flex items-center gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl font-bold text-gray-900 dark:text-white">
+              {openTodos.length}
+            </span>
+            <span className="text-xs text-gray-400">待办</span>
+          </div>
+          {overdueTodos.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 text-xs font-medium">
+              <AlertTriangle className="w-3.5 h-3.5" /> {overdueTodos.length} 项逾期
+            </span>
+          )}
+        </div>
+
+        {openTodos.length === 0 ? (
+          <p className="text-center py-6 text-gray-400 dark:text-gray-500 text-sm">
+            暂无待办，去任务看板添加吧
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {openTodos.slice(0, 4).map((t) => (
+              <div
+                key={t.id}
+                className="flex items-center gap-3 p-2.5 rounded-lg bg-gray-50 dark:bg-neutral-800"
+              >
+                <span
+                  className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${
+                    t.priority === "高"
+                      ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
+                      : t.priority === "中"
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                        : "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300"
+                  }`}
+                >
+                  {t.priority}
+                </span>
+                <span className="flex-1 text-sm text-gray-900 dark:text-white truncate">
+                  {t.title}
+                </span>
+                {t.due && (
+                  <span
+                    className={`text-xs ${
+                      new Date(t.due).getTime() < Date.now()
+                        ? "text-red-500 font-medium"
+                        : "text-gray-400"
+                    }`}
+                  >
+                    {t.due}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -227,23 +315,15 @@ export default function DashboardPage() {
                 <CalendarCheck className="w-5 h-5" />
               )
             }
-            label="日历事件"
-            value={`${totalEvents} 个事件`}
-            color="text-green-500"
+            label="今日事件"
+            value={`${todayEvents.length} 个`}
+            color={todayEvents.length > 0 ? "text-green-500" : "text-gray-400"}
           />
           <StatusCard
             icon={<GitBranch className="w-5 h-5" />}
-            label="MD 同步"
-            value={
-              import.meta.env.VITE_MD_ICS_ENABLED === "true"
-                ? "已启用"
-                : "待启用"
-            }
-            color={
-              import.meta.env.VITE_MD_ICS_ENABLED === "true"
-                ? "text-green-500"
-                : "text-yellow-500"
-            }
+            label="数据源"
+            value={`${totalEvents} 个事件`}
+            color={totalEvents > 0 ? "text-green-500" : "text-yellow-500"}
           />
           <StatusCard
             icon={<FileText className="w-5 h-5" />}
@@ -303,11 +383,11 @@ export default function DashboardPage() {
             <span>{syncError}</span>
           </div>
         )}
-        {calendars.length === 0 && (
+        {totalEvents === 0 && (
           <div className="mt-3 flex items-start gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-yellow-600 dark:text-yellow-400 text-sm">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <span>
-              尚未配置 CalDAV 服务器。请前往设置页面添加服务器配置以开始使用。
+              events.md 里还没有任何事件。日历页新建事件后会写入该文件，它是本工具的唯一事实源。
             </span>
           </div>
         )}

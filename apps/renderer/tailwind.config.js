@@ -4,43 +4,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 使用CSS变量的主题颜色
-        primary: {
-          DEFAULT: "var(--color-primary, #8d9ba8)",
-          ...Object.fromEntries(
-            Array.from({ length: 10 }, (_, i) => [
-              `${(i + 1) * 100}`,
-              `var(--color-primary, #8d9ba8)`
-            ])
-          )
-        },
-        secondary: {
-          DEFAULT: "var(--color-secondary, #a89d8d)",
-          ...Object.fromEntries(
-            Array.from({ length: 10 }, (_, i) => [
-              `${(i + 1) * 100}`,
-              `var(--color-secondary, #a89d8d)`
-            ])
-          )
-        },
-        accent: {
-          DEFAULT: "var(--color-accent, #9da88d)",
-          ...Object.fromEntries(
-            Array.from({ length: 10 }, (_, i) => [
-              `${(i + 1) * 100}`,
-              `var(--color-accent, #9da88d)`
-            ])
-          )
-        },
-        neutral: {
-          DEFAULT: "var(--color-neutral, #c5c5c5)",
-          ...Object.fromEntries(
-            Array.from({ length: 10 }, (_, i) => [
-              `${(i + 1) * 100}`,
-              `var(--color-neutral, #c5c5c5)`
-            ])
-          )
-        },
+        // 注意：故意不扩展 primary/secondary/accent/neutral 调色板。
+        // 之前的实现把它们全部映射到 var(--color-*, <莫兰迪色>) 并有 100~900
+        // 共 10 阶全部 fallback 成同一个莫兰迪色，结果 bg-neutral-100、
+        // bg-neutral-800、dark:bg-neutral-900 等几十处全被染成土褐/墨绿，
+        // 整个页面变成诡异的莫兰迪色块（用户在 dashboard 截图里看到的就是这个）。
+        //
+        // 现在：默认色阶由 Tailwind 自身提供（neutral=slate, gray 等），
+        // 主题切换只影响「品牌色工具类」（bg-brand / text-brand-accent 等），
+        // 这些类由 index.css 的 @theme inline 引用 --app-color-* 变量。
+
         // 主色调 - 用于主要按钮和链接
         blue: {
           50: "#eff6ff",

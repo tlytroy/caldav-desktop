@@ -8,8 +8,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // dev 下不注册 Service Worker，避免缓存错乱 / 打开页面时 SW 报错
       devOptions: {
-        enabled: true
+        enabled: false
       },
       manifest: {
         name: 'CalDAV Calendar',
