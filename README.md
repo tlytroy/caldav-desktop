@@ -416,3 +416,40 @@ This project was developed with the help of AI coding assistants, demonstrating 
 **June 30, 2026**: Enhanced delete functionality and sync management with improved error handling and user feedback. Documentation consolidated and redundant files removed.
 
 **June 25, 2026**: Repository cleaned and optimized - large build artifacts removed from Git history for better performance and reduced clone times. All documentation updated to reflect latest changes.
+
+## 🧩 扩展性与通用性
+
+### 配置：界面可改，不必翻文件
+
+所有配置都能在**设置界面**里改（设置 → 通用 / AI 解析 / 同步），保存到项目根目录的
+`config.json`（已加入 `.gitignore`，含密钥不入库）。
+
+配置来源优先级：
+
+```
+config.json（界面写入） > 环境变量 > 项目 .env > 代码默认值
+```
+
+敏感字段（API Key / 密码）读取时返回掩码（`sk-****abcd`），
+界面原样回传掩码时视为「未修改」，**不会覆盖真实值**。
+
+### 多语言
+
+内置 `zh-CN` / `en-US`，在设置里切换立即生效。
+语言包 key 有一致性测试保证（`apps/renderer/src/__tests__/i18n.test.ts`），
+少一个 key 就会测试失败 —— 避免界面静默串语言。
+
+### 模块可插拔
+
+新增模块**不需要改核心代码**：
+
+1. 在 `apps/renderer/plugins/` 放 `<id>.json`（声明 id / name / routes / navItems）
+2. （可选）放 `<id>.tsx` 组件（default export）
+3. 重启应用，模块自动出现在侧边栏
+
+示例见 `apps/renderer/plugins/example.json`。
+插件 id 与内置模块冲突时会被跳过（不覆盖内置功能）；
+组件文件缺失时退化为占位页面。
+
+> 插件目录必须在 `apps/renderer/` 内 —— 插件是渲染进程的一部分，
+> 需要和主应用共享 `node_modules`。

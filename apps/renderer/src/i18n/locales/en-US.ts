@@ -1,0 +1,260 @@
+/**
+ * English language pack
+ *
+ * Keys MUST match zh-CN exactly — the framework falls back to en-US for any
+ * missing zh-CN key, and a structural mismatch means silent English leaking
+ * into the Chinese UI (or vice versa).
+ */
+
+export const enUS = {
+  common: {
+    save: "Save",
+    cancel: "Cancel",
+    close: "Close",
+    delete: "Delete",
+    edit: "Edit",
+    add: "Add",
+    test: "Test",
+    testing: "Testing…",
+    saving: "Saving…",
+    reset: "Reset",
+    confirm: "Confirm",
+    enabled: "Enabled",
+    disabled: "Disabled",
+    loading: "Loading…",
+    saved: "Saved",
+    none: "None",
+    yes: "Yes",
+    no: "No",
+    all: "All",
+    copy: "Copy",
+    copied: "Copied",
+    retry: "Retry",
+    back: "Back",
+    unknown: "Unknown",
+  },
+
+  nav: {
+    dashboard: "Dashboard",
+    calendar: "Calendar",
+    tasks: "Tasks",
+    settings: "Settings",
+    roadmap: "Roadmap",
+    modules: "Modules",
+  },
+
+  settings: {
+    title: "Settings",
+    tabs: {
+      appearance: "Appearance",
+      ai: "AI Parsing",
+      sync: "Sync",
+      general: "General",
+      about: "About",
+    },
+    appearance: {
+      theme: "Theme",
+      themeLight: "Light",
+      themeDark: "Dark",
+      themeSystem: "Follow system",
+      colorScheme: "Color scheme",
+      customColor: "Custom colors",
+      primary: "Primary",
+      secondary: "Secondary",
+      accent: "Accent",
+      neutral: "Neutral",
+      borderRadius: "Corner radius",
+      radiusNone: "Square",
+      radiusSm: "Small",
+      radiusMd: "Medium",
+      radiusLg: "Large",
+    },
+    ai: {
+      title: "AI Parsing",
+      description:
+        "Used for natural-language sentences that local rules can't cover, and for speech-to-text. Everything works without it — local rule parsing is always available.",
+      enabled: "Enable AI",
+      baseUrl: "Endpoint URL",
+      baseUrlHint: "Any OpenAI-compatible endpoint, e.g. https://api.deepseek.com/v1",
+      apiKey: "API Key",
+      apiKeyHint: "Stored server-side only, never sent to the browser",
+      model: "Model",
+      modelHint: "e.g. gpt-4o-mini, deepseek-chat, qwen-plus",
+      whisperModel: "Speech model",
+      whisperLanguage: "Speech language",
+      timeout: "Timeout (ms)",
+      temperature: "Temperature",
+      temperatureHint: "Use a low value (0–0.3) for event extraction — more stable results",
+      testConnection: "Test connection",
+      testHint: "Sends one minimal request to verify the URL and key",
+      testSuccess: "Connection successful",
+      testFailed: "Connection failed",
+      notConfigured: "Not configured",
+      configured: "Configured",
+    },
+    sync: {
+      title: "Sync",
+      caldav: "CalDAV",
+      caldavDesc:
+        "Converts events.md to ICS and pushes to a calendar server, for interoperability with other calendar apps",
+      webdav: "WebDAV",
+      webdavDesc:
+        "Syncs the md files themselves — no ICS conversion. Useful when you have no CalDAV server",
+      rootUrl: "Server URL",
+      username: "Username",
+      password: "Password",
+      syncDirection: "Sync direction",
+      directionPush: "Push only (MD → server)",
+      directionPull: "Pull only (server → MD)",
+      directionBoth: "Bidirectional",
+      autoSyncMinutes: "Auto-sync interval (minutes)",
+      autoSyncHint: "0 means sync only when you click manually",
+      remoteDir: "Remote directory",
+      testWebdav: "Test WebDAV connection",
+    },
+    general: {
+      title: "General",
+      language: "Interface language",
+      languageHint: "Takes effect immediately",
+      preferAI: "Prefer AI parsing",
+      preferAIHint:
+        "When off, local rules are tried first (faster, works offline); AI is only called when rules fail",
+      parserLocale: "Parsing language",
+      configFile: "Config file location",
+    },
+    about: {
+      title: "About",
+      version: "Version",
+      dataSource: "Data source",
+      dataSourceHint:
+        "All events and tasks live in md files — open them with any text editor to view and edit",
+    },
+  },
+
+  quickCreate: {
+    title: "Quick create",
+    placeholder: "Just type… e.g. “project review with Wang at 3pm tomorrow”",
+    parse: "Parse",
+    parsing: "Parsing…",
+    create: "Create",
+    creating: "Creating…",
+    cancel: "Cancel",
+    clear: "Clear",
+    voice: "Voice input",
+    stopVoice: "Stop recording",
+    listening: "Listening… describe the event",
+    addToKanban: "Also add to task board",
+    localParse: "Local rules",
+    aiParse: "AI parsing",
+    lowConfidence: "Low confidence — please check",
+    aiReparse: "Re-parse with AI",
+    aiDeepParse: "Parse with AI",
+    parseFailed:
+      "Couldn't find a time in that. Try something like “3pm tomorrow with Wang”, or use “Parse with AI”.",
+    parseFailed2: "Parse failed: ",
+    voiceUnsupported: "Speech input isn't supported in this browser",
+    voiceFallback:
+      "No built-in speech? Switch to AI speech recognition (record, then upload for transcription)",
+    voiceBuiltin: "Use the browser's built-in speech recognition instead",
+    aiUnavailable: "AI unavailable — used local rules instead",
+    created: "Created",
+    createFailed: "Create failed",
+    aiHint: "Configure AI to enable deep parsing and speech-to-text",
+    noTimeDetected: "No time detected",
+    allDay: "All day",
+  },
+
+  webdav: {
+    title: "WebDAV sync",
+    description:
+      "Syncs events.md and the task board md file directly to your WebDAV server. Unlike the CalDAV channel, no ICS conversion is involved.",
+    notConfigured: "WebDAV is not configured",
+    notConfiguredHint: "Please set WEBDAV_URL in Settings",
+    push: "Push to WebDAV",
+    pull: "Pull from WebDAV",
+    test: "Test connection",
+    fileStatus: "File status",
+    synced: "In sync",
+    remoteChanged: "Changed remotely",
+    remoteMissing: "Missing remotely",
+    lastSync: "Last sync",
+    neverSynced: "Never synced",
+    conflict: "Conflict",
+    conflictHint:
+      "The remote copy has changes. Pull to review it first, then decide whether to overwrite.",
+    forceOverwrite: "Overwrite remote with local",
+    useRemote: "Use the remote version",
+    backupNote: "A .bak backup is created before a pull overwrites local files",
+    optimisticLockNote:
+      "Push uses an ETag optimistic lock — if the remote was changed on another device, nothing is overwritten",
+  },
+
+  dashboard: {
+    title: "Dashboard",
+    tagline: "Calendar · Tasks · Board — md files as the single source of truth",
+    todayEvents: "Today's events",
+    noEventsToday: "Nothing scheduled today",
+    noEventsYet: "No events in events.md yet",
+    pendingTasks: "To do",
+    overdue: "Overdue",
+    dataSource: "Data source",
+    eventCount: "events",
+    currentCalendar: "Current calendar",
+    quickActions: "Quick actions",
+    moduleEntries: "Modules",
+  },
+
+  tasks: {
+    title: "Tasks",
+    pending: "To do",
+    completed: "Done",
+    overdue: "Overdue",
+    addTask: "Add task",
+    allTasks: "All tasks",
+    empty: "No tasks yet",
+    emptyHint:
+      "Add one on the board, or tick “Also add to task board” in quick create",
+    priority: {
+      高: "High",
+      中: "Medium",
+      低: "Low",
+    },
+  },
+
+  calendar: {
+    title: "Calendar",
+    importIcs: "Import ICS",
+    exportIcs: "Export ICS",
+    importIcsTitle: "Import iCalendar file",
+    parsed: "Parsed",
+    willImport: "Will import",
+    skipDuplicate: "Skipped",
+    importConfirm: "Import",
+    replaceMode: "Replace instead of append",
+    replaceHint:
+      "By default new events are appended. Ticking this clears all events in events.md first, keeping only the imported ones. This cannot be undone.",
+    previous5: "First 5 preview",
+    more: "…and {n} more",
+    importDone: "Imported {n} events",
+    importFailed: "Import failed",
+    today: "Today",
+    dataSource: "Data source",
+    lastSync: "Last sync",
+  },
+
+  module: {
+    placeholderTitle: "This module isn't built yet",
+    placeholderDesc:
+      "The module framework is in place; the feature is still to come. See REF/ for the roadmap of each module.",
+    unavailable: "Module unavailable",
+  },
+
+  errors: {
+    network: "Network error",
+    unknown: "Unknown error",
+    configSaveFailed: "Failed to save configuration",
+    invalidUrl: "Invalid URL format",
+  },
+} as const;
+
+export type EnUS = typeof enUS;

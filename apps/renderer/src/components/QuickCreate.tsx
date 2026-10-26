@@ -33,6 +33,7 @@ import {
   type NlpStatus,
 } from "../api/nlp";
 import { useSpeech, useRecorder } from "../hooks/useSpeech";
+import { useI18n } from "../i18n";
 
 interface QuickCreateProps {
   /** 确认创建时回调（已带上解析好的字段，可直接提交） */
@@ -49,6 +50,7 @@ interface QuickCreateProps {
 }
 
 export default function QuickCreate({ onCreate }: QuickCreateProps) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const [status, setStatus] = useState<NlpStatus | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -86,26 +88,26 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
   /** 调用解析 */
   const runParse = useCallback(
     async (forceAI?: boolean) => {
-      const t = text.trim();
-      if (!t) return;
+      const input = text.trim();
+      if (!input) return;
       setParsing(true);
       setParseError(null);
       try {
-        const r = await parseNaturalLanguageText(t, { forceAI });
+        const r = await parseNaturalLanguageText(input, { forceAI });
         setDraft(r.draft);
         if (r.fallbackReason) {
           // AI 失败已回退本地，提示但不影响使用
-          flash("AI 不可用，已用本地规则解析");
+          flash(t("quickCreate.aiUnavailable"));
         }
       } catch (e: any) {
         setDraft(null);
         if (e?.response?.data?.needManualInput) {
           setParseError(
-            "没能识别出时间信息。试试「明天下午3点和老王开会」这类说法，或点「用 AI 深度解析」。",
+            t("quickCreate.parseFailed"),
           );
         } else {
           setParseError(
-            "解析失败：" + (e?.response?.data?.error || e?.message || "未知错误"),
+            t("quickCreate.parseFailed2") + (e?.response?.data?.error || e?.message || "未知错误"),
           );
         }
       } finally {
@@ -172,10 +174,10 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
       setDraft(null);
       setText("");
       setAddToKanban(false);
-      flash("已创建");
+      flash(t("quickCreate.created"));
       inputRef.current?.focus();
     } catch (e) {
-      flash("创建失败：" + (e as Error).message);
+      flash(t("quickCreate.createFailed") + (e as Error).message);
     } finally {
       setCreating(false);
     }
@@ -198,7 +200,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="说点什么… 如「明天下午3点和老王开项目评审会」"
+            placeholder={t("quickCreate.placeholder")}
             className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </div>
@@ -214,7 +216,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
                 ? "停止录音"
                 : speech.supported
                   ? "语音输入（浏览器内置）"
-                  : "当前浏览器不支持语音输入"
+                  : t("quickCreate.voiceUnsupported")
           }
           className={`p-2.5 rounded-lg border transition-colors shrink-0 disabled:opacity-50 ${
             speech.listening || recorder.recording
@@ -239,7 +241,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
           className="px-4 py-2.5 rounded-lg bg-brand text-white hover:opacity-90 disabled:opacity-50 transition-opacity shrink-0 inline-flex items-center gap-1.5"
         >
           {parsing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-          解析
+          {t("quickCreate.parse")}
         </button>
       </div>
 
@@ -247,7 +249,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
       {(speech.listening || recorder.recording) && (
         <div className="mt-2 flex items-center gap-2 text-xs text-red-600 dark:text-red-400">
           <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          正在聆听…请说出事件内容
+          {t("quickCreate.listening")}
           {speech.interim && (
             <span className="text-gray-500 dark:text-gray-400 italic">
               「{speech.interim}」
@@ -262,7 +264,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
           onClick={toggleWhisper}
           className="mt-2 text-xs text-brand hover:underline"
         >
-          浏览器不支持内置语音？改用 AI 语音识别（录音后上传转写）
+          {t("quickCreate.voiceFallback")}
         </button>
       )}
       {whisperMode && recorder.recording && (
@@ -270,7 +272,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
           onClick={toggleWhisper}
           className="mt-2 text-xs text-brand hover:underline"
         >
-          改用浏览器内置语音识别
+          {t("quickCreate.voiceBuiltin")}
         </button>
       )}
 
@@ -300,7 +302,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
                 className="mt-1.5 inline-flex items-center gap-1 px-2 py-1 rounded bg-amber-600 text-white hover:opacity-90 disabled:opacity-50"
               >
                 <Wand2 className="w-3 h-3" />
-                用 AI 深度解析
+                {t("quickCreate.aiDeepParse")}
               </button>
             )}
           </div>
@@ -323,7 +325,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
             <button
               onClick={clearAll}
               className="shrink-0 p-1 rounded hover:bg-white dark:hover:bg-neutral-800 text-gray-400"
-              title="清除"
+              title={t("common.close")}
             >
               <X className="w-4 h-4" />
             </button>
@@ -338,7 +340,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
                   : "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300"
               }`}
             >
-              {draft.source === "ai" ? "AI 解析" : "本地规则"}
+              {draft.source === "ai" ? t("quickCreate.aiParse") : t("quickCreate.localParse")}
             </span>
             {draft.matchedFields?.slice(0, 4).map((f: string) => (
               <span
@@ -350,7 +352,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
             ))}
             {draft.confidence < 0.6 && (
               <span className="text-amber-600 dark:text-amber-400">
-                识别把握不大，建议确认
+                {t("quickCreate.lowConfidence")}
               </span>
             )}
           </div>
@@ -364,7 +366,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
               className="h-3.5 w-3.5 rounded border-gray-300 text-brand focus:ring-brand"
             />
             <ListTodo className="w-3.5 h-3.5 text-brand" />
-            同时加入任务看板
+            {t("quickCreate.addToKanban")}
           </label>
 
           {/* 操作 */}
@@ -379,22 +381,22 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
               ) : (
                 <Check className="w-3.5 h-3.5" />
               )}
-              确认创建
+              {t("quickCreate.create")}
             </button>
             <button
               onClick={clearAll}
               className="px-3 py-1.5 rounded-lg text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-neutral-800 hover:bg-gray-200"
             >
-              取消
+              {t("quickCreate.cancel")}
             </button>
             <button
               onClick={() => runParse(true)}
               disabled={parsing || !status?.aiEnabled}
-              title={status?.aiEnabled ? "让 AI 重新理解" : "未配置 AI"}
+              title={status?.aiEnabled ? t("quickCreate.aiReparse") : t("settings.ai.notConfigured")}
               className="ml-auto px-3 py-1.5 rounded-lg text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-neutral-800 disabled:opacity-40 inline-flex items-center gap-1"
             >
               <Wand2 className="w-3.5 h-3.5" />
-              AI 重新解析
+              {t("quickCreate.aiReparse")}
             </button>
           </div>
         </div>
@@ -403,7 +405,7 @@ export default function QuickCreate({ onCreate }: QuickCreateProps) {
       {/* AI 不可用提示（不打扰，仅在首次） */}
       {!status?.aiEnabled && !draft && text.trim() && (
         <p className="mt-2 text-[11px] text-gray-400 dark:text-gray-500">
-          提示：配置 AI（.env 里 AI_BASE_URL / AI_API_KEY / AI_MODEL）后可启用 AI 深度解析与语音转写
+          {t("quickCreate.aiHint")}
         </p>
       )}
 

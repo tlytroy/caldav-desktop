@@ -5,6 +5,16 @@ import './index.css'
 import './styles/touch-optimized.css'
 import './styles/responsive.css'
 import { useThemeStore, getCurrentColors } from './store/themeStore'
+import * as lucide from 'lucide-react'
+import { registerIcons } from './framework/plugins'
+
+// 注册 lucide 图标供插件按名引用
+// （插件的 json 里写 "icon": "sparkles"，运行时按名字查表）
+registerIcons(
+  Object.fromEntries(
+    Object.entries(lucide).filter(([, v]) => typeof v === 'function'),
+  ) as Record<string, React.ComponentType<any>>,
+)
 
 // 初始化Capacitor（如果在原生环境中）
 const initializeCapacitor = async () => {

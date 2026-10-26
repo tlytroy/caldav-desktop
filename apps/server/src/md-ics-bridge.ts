@@ -378,20 +378,71 @@ export function eventToIcs(event: BridgeEvent): string {
       const day = String(d.getDate()).padStart(2, "0");
       return `${y}${m}${day}`;
     }
-    return d.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    /**
+     * 带时区的非全天事件。
+     *
+     * ⚠️ 不能用 toISOString()：events.md 里存的是**本地时间**（无 Z 后缀），
+     * `new Date("2026-10-27T15:00:00")` 解析出来就是本地 15:00，
+     * 再 toISOString() 会转成 UTC 表示（东八区变成 07:00Z），
+     * 导致导入其他日历软件后**时间凭空偏移 8 小时**。
+     *
+     * 正确做法：输出本地时间 + TZID（RFC 5545 的标准形式），
+     * 客户端会按 TZID 正确还原。
+     */
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${y}${mo}${day}T${hh}${mi}${ss}`;
   };
+
+  /** 本机时区标识（RFC 5545 的 TZID），如 Asia/Shanghai */
+  const localTzid = (() => {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      return tz || "UTC";
+    } catch {
+      return "UTC";
+    }
+  })();
+
+  const tzidSuffix = event.allDay ? "" : `;TZID=${localTzid}`;
 
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//CalDAV Desktop MD Bridge//EN",
+  ];
+
+  // 带 TZID 的事件需要配套 VTIMEZONE 块，否则部分客户端会当作浮动时间处理
+  if (!event.allDay && localTzid !== "UTC") {
+    // 偏移量按当天的实际值算（-getTimezoneOffset()，JS 的符号是反的）
+    const offsetMin = -new Date().getTimezoneOffset();
+    const sign = offsetMin >= 0 ? "+" : "-";
+    const abs = Math.abs(offsetMin);
+    const offsetStr = `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}${String(abs % 60).padStart(2, "0")}`;
+    lines.push(
+      "BEGIN:VTIMEZONE",
+      `TZID:${localTzid}`,
+      "BEGIN:STANDARD",
+      "DTSTART:19700101T000000",
+      `TZOFFSETFROM:${offsetStr}`,
+      `TZOFFSETTO:${offsetStr}`,
+      "END:STANDARD",
+      "END:VTIMEZONE",
+    );
+  }
+
+  lines.push(
     "BEGIN:VEVENT",
     `UID:${uid}`,
     `DTSTAMP:${dtstamp}`,
-    `DTSTART${event.allDay ? ";VALUE=DATE" : ""}:${formatDate(startDate, event.allDay)}`,
-    `DTEND${event.allDay ? ";VALUE=DATE" : ""}:${formatDate(endDate, event.allDay)}`,
+    `DTSTART${event.allDay ? ";VALUE=DATE" : tzidSuffix}:${formatDate(startDate, event.allDay)}`,
+    `DTEND${event.allDay ? ";VALUE=DATE" : tzidSuffix}:${formatDate(endDate, event.allDay)}`,
     `SUMMARY:${event.title}`,
-  ];
+  );
 
   // STATUS
   if (event.status) {
@@ -493,9 +544,16 @@ export function icsToEvent(icsContent: string): BridgeEvent | null {
   if (summaryMatch) event.title = summaryMatch[1].trim();
 
   // DTSTART
-  const dtstartMatch = block.match(/^DTSTART(?:;VALUE=DATE)?:(.+)$/m);
+  /**
+   * 参数部分要能容忍任意组合：`;VALUE=DATE`、";TZID=Asia/Shanghai"，
+   * 甚至两者同时出现。原先只写死 `(?:;VALUE=DATE)?`，
+   * 导致带 TZID 的行（我们自己导出格式）**完全匹配不上**，
+   * 解析结果会丢失开始时间。
+   */
+  const dtstartMatch = block.match(/^DTSTART((?:;[^:]*)?):(.+)$/m);
   if (dtstartMatch) {
-    const val = dtstartMatch[1].trim();
+    const params = dtstartMatch[1] || "";
+    const val = dtstartMatch[2].trim();
     if (/^\d{8}$/.test(val)) {
       // VALUE=DATE 不含时区，按本地零点解析，保留"日历上的那一天"
       event.date = `${val.slice(0, 4)}-${val.slice(4, 6)}-${val.slice(6, 8)}T00:00:00`;
@@ -508,6 +566,10 @@ export function icsToEvent(icsContent: string): BridgeEvent | null {
         )
         .replace(/Z$/, "");
     }
+    // TZID 存在且值是本地时间 → 按本地时间处理（去掉 Z 后的串即本地时间）
+    if (/TZID=/i.test(params) && !/VALUE=DATE/i.test(params)) {
+      event.allDay = false;
+    }
   }
 
   // DTSTART with VALUE=DATE
@@ -515,10 +577,10 @@ export function icsToEvent(icsContent: string): BridgeEvent | null {
     event.allDay = true;
   }
 
-  // DTEND
-  const dtendMatch = block.match(/^DTEND(?:;VALUE=DATE)?:(.+)$/m);
+  // DTEND —— 同样要容忍 TZID 等参数
+  const dtendMatch = block.match(/^DTEND((?:;[^:]*)?):(.+)$/m);
   if (dtendMatch) {
-    const val = dtendMatch[1].trim();
+    const val = dtendMatch[2].trim();
     if (/^\d{8}$/.test(val)) {
       event.end = `${val.slice(0, 4)}-${val.slice(4, 6)}-${val.slice(6, 8)}T00:00:00`;
     } else {

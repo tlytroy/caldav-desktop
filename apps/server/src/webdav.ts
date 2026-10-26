@@ -17,6 +17,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { getConfig } from "./config.js";
 
 export interface WebDAVConfig {
   enabled: boolean;
@@ -39,15 +40,16 @@ export interface RemoteFileInfo {
   size?: number;
 }
 
-/** 加载 WebDAV 配置（沿用项目既有的 env 读取风格） */
+/** 加载 WebDAV 配置。来源：config.json（界面写入）> 环境变量 / .env > 默认值 */
 export function loadWebDAVConfig(): WebDAVConfig {
+  const cfg = getConfig();
   return {
-    enabled: process.env.WEBDAV_ENABLED === "true" || !!process.env.WEBDAV_URL,
-    url: (process.env.WEBDAV_URL || "").trim(),
-    username: process.env.WEBDAV_USER || "",
-    password: process.env.WEBDAV_PASS || "",
-    remoteDir: (process.env.WEBDAV_EVENTS_PATH || "CalDAV-Desktop/events.md").trim(),
-    timeoutMs: parseInt(process.env.WEBDAV_TIMEOUT_MS || "20000", 10),
+    enabled: cfg.webdav.enabled || !!cfg.webdav.url,
+    url: (cfg.webdav.url || "").trim(),
+    username: cfg.webdav.username || "",
+    password: cfg.webdav.password || "",
+    remoteDir: `CalDAV-Desktop/events.md`,
+    timeoutMs: cfg.webdav.timeoutMs || 20000,
   };
 }
 

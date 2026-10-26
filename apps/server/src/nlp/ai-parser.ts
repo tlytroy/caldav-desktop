@@ -23,6 +23,7 @@ import {
   isUsableDraft,
   type ParsedDraft,
 } from "./zh-time.js";
+import { getConfig, getSecret } from "../config.js";
 
 export interface AIConfig {
   enabled: boolean;
@@ -34,16 +35,21 @@ export interface AIConfig {
   temperature: number;
 }
 
+/**
+ * 读取 AI 配置。
+ *
+ * 数据来源优先级：config.json（界面写入）> 环境变量 / .env > 默认值。
+ * 详见 config.ts 的说明。
+ */
 export function loadAIConfig(): AIConfig {
+  const cfg = getConfig();
   return {
-    enabled:
-      process.env.AI_ENABLED === "true" ||
-      (!!process.env.AI_API_KEY && !!process.env.AI_BASE_URL),
-    baseUrl: (process.env.AI_BASE_URL || "").replace(/\/+$/, ""),
-    apiKey: process.env.AI_API_KEY || "",
-    model: process.env.AI_MODEL || "gpt-4o-mini",
-    timeoutMs: parseInt(process.env.AI_TIMEOUT_MS || "30000", 10),
-    temperature: parseFloat(process.env.AI_TEMPERATURE || "0.1"),
+    enabled: cfg.ai.enabled || (!!cfg.ai.baseUrl && !!cfg.ai.apiKey),
+    baseUrl: (cfg.ai.baseUrl || "").replace(/\/+$/, ""),
+    apiKey: cfg.ai.apiKey || getSecret("ai.apiKey"),
+    model: cfg.ai.model || "gpt-4o-mini",
+    timeoutMs: cfg.ai.timeoutMs || 30000,
+    temperature: typeof cfg.ai.temperature === "number" ? cfg.ai.temperature : 0.1,
   };
 }
 

@@ -10,6 +10,9 @@
  */
 
 import http from "node:http";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -119,12 +122,33 @@ beforeAll(async () => {
   await new Promise<void>((r) => aiServer.listen(0, r));
   baseUrl = `http://127.0.0.1:${(aiServer.address() as any).port}/v1`;
 
-  process.env.AI_ENABLED = "true";
-  process.env.AI_BASE_URL = baseUrl;
-  process.env.AI_API_KEY = "test-key-secret-123";
-  process.env.AI_MODEL = "test-model";
+  /**
+   * 配置走 config 层（与生产一致）。
+   * config.json 的优先级高于环境变量，所以必须显式写配置文件，
+   * 否则会读到其他测试留下的残留配置。
+   */
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nlp-test-"));
+  const configPath = path.join(tmpDir, "config.json");
+  process.env.APP_CONFIG_PATH = configPath;
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      ai: {
+        enabled: true,
+        baseUrl,
+        apiKey: "test-key-secret-123",
+        model: "test-model",
+        timeoutMs: 30000,
+        temperature: 0.1,
+      },
+    }),
+    "utf-8",
+  );
 
-  ({ nlpRouter } = await import("../routes/nlp.js"));
+  const { nlpRouter: router } = await import("../routes/nlp.js");
+  nlpRouter = router;
+  const configMod = await import("../config.js");
+  configMod.invalidateConfigCache();
 
   const app = express();
   app.use(express.json());
@@ -270,16 +294,19 @@ describe("降级与容错", () => {
   });
 
   it("本地也解析不了且无 AI → 422", async () => {
-    const saved = process.env.AI_ENABLED;
-    delete process.env.AI_ENABLED;
-    delete process.env.AI_API_KEY;
+    const configMod = await import("../config.js");
+    const savedUrl = configMod.getConfig().ai.baseUrl;
+    const savedKey = configMod.getConfig().ai.apiKey;
+    // 清掉 AI 配置（配置层优先级高于环境变量）
+    configMod.saveConfig({ ai: { enabled: false, baseUrl: "", apiKey: "" } } as any);
     try {
       const r = await post("/api/nlp/parse", { text: "随便聊聊天气" });
       expect(r.status).toBe(422);
       expect(r.json.needManualInput).toBe(true);
     } finally {
-      process.env.AI_ENABLED = saved;
-      process.env.AI_API_KEY = "test-key-secret-123";
+      configMod.saveConfig({
+        ai: { enabled: true, baseUrl: savedUrl, apiKey: savedKey },
+      } as any);
     }
   });
 });

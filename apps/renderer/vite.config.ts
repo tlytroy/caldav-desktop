@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import path from 'path';
 
 export default defineConfig({
   base: './',
@@ -25,5 +26,21 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    fs: {
+      /**
+       * 允许读取项目根目录的 plugins/ 目录。
+       * 插件组件放在那里（与 apps/renderer 平级），
+       * 配合 import.meta.glob 实现「放文件即装模块」。
+       */
+      allow: [path.resolve(__dirname, '..', '..')],
+    },
+  },
+  build: {
+    rollupOptions: {
+      input: {
+        // 主入口
+        index: path.resolve(__dirname, 'index.html'),
+      },
+    },
   },
 });

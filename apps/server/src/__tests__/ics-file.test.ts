@@ -121,19 +121,47 @@ describe("eventToIcs — 全天事件边界", () => {
   });
 
   it("非全天事件结束不晚于开始时兜底 +1 小时", () => {
+    const start = Date.parse("2026-09-10T10:00:00Z");
     const ics = eventToIcs({
       uid: "e-1",
       title: "异常区间",
       date: "2026-09-10T10:00:00.000Z",
       end: "2026-09-10T09:00:00.000Z",
     });
-    const start = Date.parse("2026-09-10T10:00:00Z");
-    const endMatch = ics.match(/DTEND:(\d{8}T\d{6})/)?.[1];
+    // 非全天事件带 TZID 参数，正则要允许 ;TZID=...
+    const endMatch = ics.match(/DTEND(?:;[^:]*)?:(\d{8}T\d{6})/)?.[1];
     expect(endMatch).toBeDefined();
     const end = Date.parse(
       `${endMatch!.slice(0, 4)}-${endMatch!.slice(4, 6)}-${endMatch!.slice(6, 8)}T${endMatch!.slice(9, 11)}:${endMatch!.slice(11, 13)}:${endMatch!.slice(13, 15)}Z`,
     );
     expect(end).toBeGreaterThan(start);
+  });
+
+  it("非全天事件使用本地时间 + TZID，而不是转成 UTC", () => {
+    // 回归点：原先用 toISOString() 会把本地 15:00 转成 UTC 表示（东八区变 07:00Z），
+    // 导入其他日历软件后时间凭空偏移 8 小时。
+    const ics = eventToIcs({
+      uid: "tz-1",
+      title: "时区测试",
+      date: "2026-09-10T15:00:00",
+      end: "2026-09-10T16:00:00",
+    });
+    expect(ics).toMatch(/DTSTART;TZID=[^:]+:20260910T150000/);
+    expect(ics).not.toMatch(/DTSTART[^:]*:20260910T070000Z/);
+  });
+
+  it("带 TZID 的 ICS 能被解析回来（往返一致）", () => {
+    const original = {
+      uid: "tz-2",
+      title: "往返测试",
+      date: "2026-09-10T15:00:00",
+      end: "2026-09-10T16:00:00",
+      allDay: false,
+    };
+    const back = icsToEvent(eventToIcs(original));
+    expect(back?.date).toBe(original.date);
+    expect(back?.end).toBe(original.end);
+    expect(back?.allDay).toBe(false);
   });
 });
 

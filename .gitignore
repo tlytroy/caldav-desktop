@@ -32,3 +32,6 @@ licenses/
 # WebDAV 同步运行时产物
 .webdav-state.json
 *.md.bak
+
+# 界面写入的配置（含 API Key / 密码，禁止入库）
+config.json

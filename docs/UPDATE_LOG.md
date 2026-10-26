@@ -2,7 +2,79 @@
 
 这个文件记录了项目的持续更新和改进。每次更新都应该在这个文件中添加相关信息，而不是创建新的更新日志文件。
 
-## 2026-10-19（傍晚）
+## 2026-10-26
+
+### 回应质疑：真实跑一遍 + 补齐通用性
+
+用户提了三个问题：①「能正常使用吗？是不是没完整测试过？」②「AI 之类的有没有设置界面？」
+③「想要通用的设计」。逐条处理如下。
+
+**① 真实运行验证（此前确实只做了单元测试）**
+
+之前的验证是：类型检查 + vite build + 单元测试 + mock 端到端。
+这次**真的把服务跑起来，用真实 HTTP 请求打全部接口**，立刻暴露 4 个 bug：
+
+| 问题 | 根因 | 影响 |
+| ---- | ---- | ---- |
+| 看板优先级被忽略 | `/events/add` 只读 `event.priority`，无视 `kanban.priority` | 传"高"一律存成"中" |
+| ICS 导出时间偏 8 小时 | 非全天事件用 `toISOString()` 输出 UTC，而 md 存本地时间 | 导入其他日历后时间错乱 |
+| 带 TZID 的 ICS 解析失败 | DTSTART 正则写死 `(?:;VALUE=DATE)?` | 解析丢开始时间 |
+| ESM 下 `__dirname` 不存在 | 新模块用 `__dirname` 取路径 | 服务启动即 500 |
+
+前两个是**产品级 bug** —— 单元测试用 mock 数据，测不到"传中文优先级被吞"和
+"本地时间转 UTC"这两类问题。这印证了用户质疑的价值。
+
+**② 设置界面**
+
+之前 AI / WebDAV / CalDAV 全部只能改 `.env`。现在：
+
+- 新增 `apps/server/src/config.ts` 配置层
+  优先级：config.json（界面写入）> 环境变量 > .env > 代码默认值
+- 新增 `GET/PUT /api/config` 与 `POST /api/config/reset`
+- 设置弹窗改为两个分区：外观 / 通用（内含 通用·AI 解析·同步 三个标签页）
+- AI 标签页可填 endpoint / key / model / 超时 / 温度 / Whisper，带**测试连接**按钮
+- 同步标签页可填 CalDAV（地址/账号/密码/方向/间隔）与 WebDAV（地址/账号/密码/目录），
+  带**测试 WebDAV 连接**按钮
+- 敏感字段：读取返回掩码（`sk-****abcd`），界面原样回传掩码时视为"未修改"，
+  **不会覆盖真实值**（有测试锁定）
+- config.json 加入 .gitignore
+
+**③ 通用性**
+
+- **多语言**：轻量 i18n 框架（不引 i18next，减少 Electron/Capacitor 打包体积），
+  内置 zh-CN / en-US，语言包 key 一致性由测试保证（少一个 key 就测试失败，
+  避免界面静默串语言）。日期/时间/相对时间按 locale 格式化。
+- **模块可插拔**：新增模块**不用改核心代码** —— 放 `apps/renderer/plugins/<id>.json`
+  + 可选 `<id>.tsx` 即可。示例见 `apps/renderer/plugins/example.json`。
+
+**插件目录为什么在 apps/renderer 内**
+
+最初放在项目根，实测构建报错：
+`Rollup failed to resolve import "axios" from plugins/example.tsx`
+—— 根目录没有 node_modules。插件是渲染进程的一部分，必须和主应用共享依赖。
+
+**glob 路径也踩了坑**：`import.meta.glob` 路径写错时**构建仍然成功**，
+只是插件没被打包（极易漏掉）。为此加了 `pluginGlobMatchCount()` 启动时诊断，
+路径不对会打警告。正确路径是 `../../plugins/*`（从 src/framework 上溯两级）。
+
+**ESM 路径处理的坑**
+
+新增模块用 `__dirname` 取路径，在 ESM 下直接报 `__dirname is not defined`。
+改用 `fileURLToPath(import.meta.url)`。但这还不够 ——
+「从 dist/routes 上溯 N 级到项目根」这种推导在运行时目录变化时会错
+（测试用的独立 runtime/ 目录就跑偏了）。最终改为**向上查找含 apps/ 的目录**。
+
+**测试**
+
+- 新增 `config-plugins.test.ts` 22 项（配置读写、脱敏、掩码不覆盖、插件扫描各种异常）
+- 新增 `i18n.test.ts` 6 项（两个语言包 key 完全一致、占位符一致、无空串）
+- WebDAV / NLP 测试改为通过 config 层配置（与生产一致），
+  顺带修掉了测试间的环境污染
+- ICS 测试补时区回归用例
+
+**全套离线测试 145 项 + i18n 6 项全部通过。**
+
+### 2026-10-19（傍晚）
 
 ### 自然语言快速创建 + 语音输入
 

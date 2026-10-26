@@ -207,7 +207,7 @@ const NotificationsModule: CalendarModule = {
 };
 
 // ---- 全部模块列表 ----
-export const allModules: CalendarModule[] = [
+export const builtinModules: CalendarModule[] = [
   DashboardModule,
   TasksModule,
   CalendarModule,
@@ -215,3 +215,44 @@ export const allModules: CalendarModule[] = [
   AIAgentModule,
   NotificationsModule,
 ];
+
+/**
+ * 加载外部插件模块。
+ *
+ * 插件来自项目根目录的 `plugins/` 目录（由后端 `GET /api/plugins` 扫描）。
+ * 这样新增模块**不需要修改本文件**——放个 json + 可选 tsx 即可。
+ *
+ * @param componentLoader 组件加载器（通常用 import.meta.glob 传入）
+ */
+export async function loadPluginModules(
+  componentLoader?: (
+    name: string,
+  ) => React.LazyExoticComponent<React.ComponentType<any>> | undefined,
+): Promise<CalendarModule[]> {
+  const { fetchPluginManifests, manifestToModule, validateManifest, createComponentLoader } =
+    await import("../framework/plugins");
+
+  const manifests = await fetchPluginManifests();
+  const out: CalendarModule[] = [];
+
+  // 组件加载器：优先用调用方传入的，否则用内置的 glob 扫描
+  const loader = componentLoader || createComponentLoader;
+
+  for (const m of manifests) {
+    const err = validateManifest(m);
+    if (err) {
+      console.warn(`[plugin] 跳过插件 ${m?.id || "(未知)"}：${err}`);
+      continue;
+    }
+    try {
+      out.push(manifestToModule(m, loader));
+    } catch (e) {
+      console.warn(`[plugin] 插件 ${m.id} 加载失败：`, (e as Error).message);
+    }
+  }
+
+  if (out.length) {
+    console.log(`[plugin] 已加载 ${out.length} 个外部插件：`, out.map((m) => m.id).join(", "));
+  }
+  return out;
+}

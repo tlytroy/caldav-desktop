@@ -59,11 +59,20 @@ function syncTargets(cfg: WebDAVConfig) {
   ];
 }
 
-/** 远端目录名：取 WEBDAV_EVENTS_PATH 的目录部分 */
+/**
+ * 远端目录名。
+ *
+ * 配置层（config.json / .env 的 WEBDAV_EVENTS_PATH）已经把它拆成了
+ * 「目录 + 文件名」两部分，config.remoteDir 只保留目录部分。
+ * 这里做一次兜底：万一拿到的是完整路径，取其目录部分。
+ */
 function remoteDirOf(cfg: WebDAVConfig): string {
-  const p = cfg.remoteDir.replace(/^\/+/, "");
+  const p = (cfg.remoteDir || "").replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!p) return "CalDAV-Desktop";
   const idx = p.lastIndexOf("/");
-  return idx >= 0 ? p.slice(0, idx) : p;
+  // 末尾是 .md 文件 → 取目录
+  if (/\.md$/i.test(p)) return idx >= 0 ? p.slice(0, idx) : "CalDAV-Desktop";
+  return p;
 }
 
 function requireConfig(res: express.Response): WebDAVConfig | null {

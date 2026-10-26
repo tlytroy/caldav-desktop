@@ -2,6 +2,45 @@
 
 All notable changes to CalDAV Desktop are documented here.
 
+## [Unreleased] - 2026-10-26
+
+### 🐛 实测发现的 Bug（此前只有单元测试，没有真实跑过）
+
+用户质疑「是不是没完整测试过」后，做了**真实启动服务 + 真实 HTTP 请求**的端到端验证，
+暴露出 4 个单元测试覆盖不到的问题：
+
+- **看板优先级被忽略**：`/events/add` 传 `kanban:{priority:"高"}` 无效，
+  任务一律建成「中」——代码只读 `event.priority`，完全无视 `kanban.priority`。
+- **ICS 导出时间偏移 8 小时**：非全天事件用 `toISOString()` 输出 UTC，
+  而 events.md 存的是本地时间 → 导入其他日历软件后时间凭空偏 8 小时。
+  现改为输出本地时间 + `TZID`，并补 `VTIMEZONE` 块。
+- **带 TZID 的 ICS 解析不了**：DTSTART 正则写死 `(?:;VALUE=DATE)?`，
+  匹配不上 `;TZID=Asia/Shanghai` → 解析结果丢失开始时间。
+- **ESM 下 `__dirname` 不存在**：新增的 config/plugins 模块用 `__dirname` 取路径，
+  服务启动即 500。
+
+### ✨ 配置可在界面里改
+
+- 新增 `config.json` 配置层：优先级 config.json > 环境变量 > .env > 默认值
+- 设置界面新增三个标签页：通用（语言/AI 偏好）、AI 解析、同步（CalDAV + WebDAV）
+- 敏感字段脱敏传输（`sk-****abcd`），界面回传掩码时**不覆盖真实值**
+- config.json 已加入 .gitignore
+
+### ✨ 多语言
+
+- 轻量 i18n 框架（不引 i18next，减少打包体积）
+- 内置 zh-CN / en-US 语言包，key 一致性由测试保证
+- 日期/时间/相对时间按 locale 格式化（`Intl` API）
+
+### ✨ 模块可插拔
+
+- 插件目录 `apps/renderer/plugins/`：放 `<id>.json` + 可选 `<id>.tsx` 即可新增模块
+- 后端 `GET /api/plugins` 扫描清单，前端运行时注册
+- 插件 id 与内置冲突时跳过（不覆盖内置功能），组件缺失时退化为占位页
+- 示例：`apps/renderer/plugins/example.json`
+
+---
+
 ## [Unreleased] - 2026-10-19
 
 ### 🐛 Critical Bug Fixes

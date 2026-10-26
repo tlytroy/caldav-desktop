@@ -4,6 +4,7 @@ import type { CalendarModule, RouteConfig, NavItem } from "./types";
 interface ModuleRegistryContextType {
   modules: CalendarModule[];
   registerModule: (module: CalendarModule) => void;
+  registerPlugin: (module: CalendarModule) => void;
   getModule: (id: string) => CalendarModule | undefined;
   getActiveModules: () => CalendarModule[];
   getPlaceholderModules: () => CalendarModule[];
@@ -21,6 +22,23 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       const exists = prev.find((m) => m.id === module.id);
       if (exists) {
         return prev.map((m) => (m.id === module.id ? module : m));
+      }
+      return [...prev, module];
+    });
+  }, []);
+
+  /**
+   * 注册外部插件模块。
+   * 与内置模块 id 冲突时**跳过**（不覆盖）——
+   * 外部插件是可选增强，不能顶掉核心功能。
+   */
+  const registerPlugin = useCallback((module: CalendarModule) => {
+    setModules((prev) => {
+      if (prev.some((m) => m.id === module.id)) {
+        console.warn(
+          `[plugin] 模块 id "${module.id}" 与已有模块冲突，已跳过`,
+        );
+        return prev;
       }
       return [...prev, module];
     });
@@ -55,13 +73,23 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     () => ({
       modules,
       registerModule,
+      registerPlugin,
       getModule,
       getActiveModules,
       getPlaceholderModules,
       getRoutes,
       getNavItems,
     }),
-    [modules, registerModule, getModule, getActiveModules, getPlaceholderModules, getRoutes, getNavItems],
+    [
+      modules,
+      registerModule,
+      registerPlugin,
+      getModule,
+      getActiveModules,
+      getPlaceholderModules,
+      getRoutes,
+      getNavItems,
+    ],
   );
 
   return (

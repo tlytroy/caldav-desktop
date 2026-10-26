@@ -149,6 +149,29 @@ beforeAll(async () => {
   await new Promise<void>((r) => davServer.listen(0, r));
   baseUrl = `http://127.0.0.1:${(davServer.address() as any).port}/dav/`;
 
+  /**
+   * 配置走 config 层（与生产一致）。
+   * 注意：不能只用 process.env —— config.json 的优先级高于环境变量，
+   * 而其他测试文件可能已经在磁盘上留下 config.json。
+   * 所以这里显式把 APP_CONFIG_PATH 指向临时目录并写入配置。
+   */
+  const configPath = path.join(tmpDir, "config.json");
+  process.env.APP_CONFIG_PATH = configPath;
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({
+      webdav: {
+        enabled: true,
+        url: baseUrl,
+        username: "tester",
+        password: "secret",
+        remoteDir: "CalDAV-Desktop",
+        timeoutMs: 20000,
+      },
+    }),
+    "utf-8",
+  );
+
   savedEnv = {
     WEBDAV_URL: process.env.WEBDAV_URL,
     WEBDAV_USER: process.env.WEBDAV_USER,
@@ -156,19 +179,19 @@ beforeAll(async () => {
     WEBDAV_EVENTS_PATH: process.env.WEBDAV_EVENTS_PATH,
     MD_EVENTS_FILE: process.env.MD_EVENTS_FILE,
     KANBAN_FILE_PATH: process.env.KANBAN_FILE_PATH,
+    APP_CONFIG_PATH: process.env.APP_CONFIG_PATH,
   };
-  process.env.WEBDAV_URL = baseUrl;
-  process.env.WEBDAV_USER = "tester";
-  process.env.WEBDAV_PASS = "secret";
-  process.env.WEBDAV_EVENTS_PATH = "CalDAV-Desktop/events.md";
   process.env.MD_EVENTS_FILE = eventsFile;
   process.env.KANBAN_FILE_PATH = kanbanFile;
 
   ({ webdavRouter } = await import("../routes/webdav.js"));
   const wd = await import("../webdav.js");
+  const configMod = await import("../config.js");
   loadWebDAVConfig = wd.loadWebDAVConfig;
   normalizeEtag = wd.normalizeEtag;
   readSyncState = wd.readSyncState;
+  // 配置层有缓存，改完要失效
+  configMod.invalidateConfigCache();
 
   const app = express();
   app.use(express.json());
@@ -220,20 +243,29 @@ describe("WebDAV 配置", () => {
   });
 
   it("未配置时 status 报 configured=false", async () => {
-    const saved = process.env.WEBDAV_URL;
-    delete process.env.WEBDAV_URL;
-    const r = await get("/api/webdav/status");
-    expect(r.json.configured).toBe(false);
-    process.env.WEBDAV_URL = saved;
+    const configMod = await import("../config.js");
+    const saved = configMod.getConfig().webdav.url;
+    // 直接把配置层的 url 清空（配置层优先级高于环境变量）
+    configMod.saveConfig({ webdav: { url: "" } } as any);
+    try {
+      const r = await get("/api/webdav/status");
+      expect(r.json.configured).toBe(false);
+    } finally {
+      configMod.saveConfig({ webdav: { url: saved } } as any);
+    }
   });
 
   it("未配置时 push 返回 400 且提示可操作", async () => {
-    const saved = process.env.WEBDAV_URL;
-    delete process.env.WEBDAV_URL;
-    const r = await post("/api/webdav/push");
-    expect(r.status).toBe(400);
-    expect(r.json.error).toMatch(/WEBDAV_URL/);
-    process.env.WEBDAV_URL = saved;
+    const configMod = await import("../config.js");
+    const saved = configMod.getConfig().webdav.url;
+    configMod.saveConfig({ webdav: { url: "" } } as any);
+    try {
+      const r = await post("/api/webdav/push");
+      expect(r.status).toBe(400);
+      expect(r.json.error).toMatch(/WEBDAV_URL/);
+    } finally {
+      configMod.saveConfig({ webdav: { url: saved } } as any);
+    }
   });
 });
 

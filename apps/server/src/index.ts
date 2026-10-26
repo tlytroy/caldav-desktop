@@ -7,6 +7,8 @@ import { mdBridgeRouter } from "./routes/md-bridge.js";
 import { kanbanRouter } from "./routes/kanban.js";
 import { webdavRouter } from "./routes/webdav.js";
 import { nlpRouter } from "./routes/nlp.js";
+import { configRouter } from "./routes/config.js";
+import { pluginRouter } from "./routes/plugins.js";
 import { loadBridgeConfig } from "./md-ics-bridge.js";
 
 const app = express();
@@ -35,6 +37,12 @@ app.use("/api/webdav", webdavRouter);
 // 自然语言快速创建 routes（本地规则 + 可选 AI 增强）
 app.use("/api/nlp", nlpRouter);
 
+// 统一配置 routes（设置界面读写 config.json）
+app.use("/api/config", configRouter);
+
+// 插件 routes（扫描 plugins/ 目录，返回模块清单）
+app.use("/api/plugins", pluginRouter);
+
 async function start() {
   // CalDAV 连接失败**不应阻止服务启动**。
   //
@@ -57,6 +65,7 @@ async function start() {
     console.log(`📋 Kanban:      http://localhost:${PORT}/api/kanban`);
     console.log(`☁️  WebDAV:      http://localhost:${PORT}/api/webdav/status`);
     console.log(`✨ Quick create: http://localhost:${PORT}/api/nlp/status`);
+    console.log(`⚙️  Config:      http://localhost:${PORT}/api/config`);
   });
 }
 

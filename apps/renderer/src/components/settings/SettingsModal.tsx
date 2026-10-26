@@ -1,14 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useThemeStore, morandiSchemes, getCurrentColorScheme, getCurrentColors } from '../../store/themeStore';
-import { Palette, Sun, Moon, Square, Shapes } from 'lucide-react';
+import { Palette, Sun, Moon, Square, Shapes, Settings2 } from 'lucide-react';
 import { Modal } from '../ui/Modal';
+import ConfigSettings from './ConfigSettings';
+import { useI18n } from '../../i18n';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+/** 设置弹窗的两个分区：外观 / 数据与集成 */
+type SettingsTab = 'appearance' | 'config';
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
+  const { t } = useI18n();
+  const [tab, setTab] = useState<SettingsTab>('appearance');
   const {
     isDarkMode,
     toggleTheme,
@@ -84,7 +91,36 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const currentScheme = getCurrentColorScheme(useThemeStore.getState());
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="设置" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={t("settings.title")} size="lg">
+      {/* 分区标签 */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-5">
+        <button
+          onClick={() => setTab('appearance')}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
+            tab === 'appearance'
+              ? 'border-brand text-brand'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+          }`}
+        >
+          <Palette className="w-3.5 h-3.5" />
+          {t("settings.tabs.appearance")}
+        </button>
+        <button
+          onClick={() => setTab('config')}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm border-b-2 -mb-px transition-colors ${
+            tab === 'config'
+              ? 'border-brand text-brand'
+              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+          }`}
+        >
+          <Settings2 className="w-3.5 h-3.5" />
+          {t("settings.tabs.general")}
+        </button>
+      </div>
+
+      {tab === 'config' ? (
+        <ConfigSettings />
+      ) : (
       <div className="space-y-6">
         {/* 主题设置 */}
         <div className="space-y-4">
@@ -311,14 +347,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
         </div>
       </div>
+      )}
 
       <div className="flex justify-end mt-6">
         <button
           onClick={onClose}
           className="px-6 py-3 text-gray-700 bg-gray-100 dark:text-gray-200 dark:bg-gray-600 rounded-md hover:bg-gray-200 dark:hover:bg-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors"
-          aria-label="关闭设置"
+          aria-label={t("common.close")}
         >
-          关闭
+          {t("common.close")}
         </button>
       </div>
     </Modal>

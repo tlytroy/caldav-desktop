@@ -211,16 +211,28 @@ mdBridgeRouter.post("/events/add", async (req, res) => {
     if (kanban && typeof kanban === "object") {
       const dateOnly = event.date?.slice(0, 10);
       try {
+        /**
+         * 优先级取值顺序：kanban.priority（中文 高/中/低）> event.priority（英文 high/medium/low）> 默认「中」。
+         *
+         * 历史 bug：原先只看 event.priority，导致调用方传 `kanban:{priority:"高"}` 被静默忽略，
+         * 任务一律建成「中」优先级。
+         */
+        const rawPriority = kanban.priority ?? event.priority;
+        const priority =
+          rawPriority === "高" || rawPriority === "high"
+            ? "高"
+            : rawPriority === "低" || rawPriority === "low"
+              ? "低"
+              : "中";
+
+        // 项目名同理：kanban.project 优先于事件的 category
+        const project = kanban.project ?? resolvedCategory;
+
         kanbanTaskId = insertKanbanTaskLine({
           title: event.title,
-          priority:
-            event.priority === "high"
-              ? "高"
-              : event.priority === "low"
-                ? "低"
-                : "中",
+          priority,
           due: dateOnly,
-          project: resolvedCategory,
+          project,
           calendarEventUid: uid,
         });
       } catch (e) {

@@ -1,0 +1,26 @@
+{
+  "id": "example",
+  "name": "示例插件",
+  "version": "1.0.0",
+  "description": "演示插件机制：放一个 json + 一个 tsx 就能新增模块，不需要改核心代码",
+  "icon": "sparkles",
+  "status": "active",
+  "order": 90,
+  "component": "example",
+  "routes": [
+    {
+      "path": "/example",
+      "title": "示例插件",
+      "icon": "sparkles",
+      "showInNav": true
+    }
+  ],
+  "navItems": [
+    {
+      "id": "nav-example",
+      "label": "示例插件",
+      "icon": "sparkles",
+      "path": "/example"
+    }
+  ]
+}
