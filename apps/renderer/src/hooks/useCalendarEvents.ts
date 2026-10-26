@@ -1,45 +1,50 @@
 import { useState, useEffect, useCallback } from "react";
 import type { LoadingState } from "../types";
 import {
-  fetchMdEvents,
-  addMdEvent,
-  updateMdEvent,
-  deleteMdEvent,
-  syncMdToCaldav,
-  type MdEvent,
-  type KanbanPayload,
-} from "../api/md-bridge";
+  fetchItems,
+  createItem,
+  updateItem,
+  deleteItem,
+  type WorkbenchItem,
+} from "../api/workspace";
 
 /**
- * useCalendarEvents - 日历事件 hook（MD 优先架构）
+ * useCalendarEvents —— 日历视图（workspace.md 的一部分）
  *
- * 数据流：
- *   events.md（本地事实源）→ useCalendarEvents → FullCalendar
- *   用户创建/删除事件 → POST /api/md-bridge/events/add 或 DELETE
- *   （可选）完成后调 syncMdToCaldav() 推送到 CalDAV
+ * ## 架构
  *
- * `calendarUrl` 现在仅作为「CalDAV 同步目标」使用，可选。
- * 不再阻塞 UI：就算没配置 CalDAV，日历也能完整显示。
+ * 日历不再是独立的数据源，而是**统一数据源的一个视图**：
  *
- * 双向绑定：createEvent 第二参数 kanban 可让后端同时在 工作搭子看板 创建任务并互填链接；
- * deleteEvent 第二参数 cascade=true 表示删除事件时联动删除绑定的看板任务。
+ *   workspace.md（唯一事实源）
+ *        ↓ 按 scope=calendar + 展开重复规则筛选
+ *   日历模块
+ *
+ * 看板模块读的是**同一个文件**，只是筛选条件不同。
+ * 所以「体检」这类任务会同时出现在两个视图里 —— 因为它就是同一条记录。
+ *
+ * @param refreshKey 外部数据变更时自增，触发重读
  */
 export function useCalendarEvents(_calendarUrl?: string | null, refreshKey?: number) {
-  const [events, setEvents] = useState<MdEvent[]>([]);
+  const [events, setEvents] = useState<WorkbenchItem[]>([]);
   const [loadingState, setLoadingState] = useState<LoadingState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
 
-  /** 从 events.md 读取（不依赖网络，不走 CalDAV） */
+  /**
+   * 读取日历视图的数据。
+   *
+   * expand=true 让服务端把重复事件展开成多个实例
+   * （「每周一三五」在月视图里显示成 13 个独立的格子）。
+   */
   const loadEvents = useCallback(async () => {
     setLoadingState("loading");
     setError(null);
     try {
-      const r = await fetchMdEvents();
-      setEvents(r.events || []);
+      const r = await fetchItems({ scope: "calendar", expand: true });
+      setEvents(r.items || []);
       setLoadingState("success");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "读取 events.md 失败";
+      const msg = err instanceof Error ? err.message : "读取数据源失败";
       setError(msg);
       setLoadingState("error");
       setEvents([]); // 失败时清空，不要显示陈旧缓存
@@ -50,7 +55,7 @@ export function useCalendarEvents(_calendarUrl?: string | null, refreshKey?: num
     loadEvents();
   }, [loadEvents]);
 
-  // 外部数据变更（如自然语言快速创建写盘）后重读 events.md
+  // 外部数据变更（如自然语言快速创建写盘）后重读
   useEffect(() => {
     if (refreshKey !== undefined && refreshKey > 0) {
       loadEvents();
@@ -58,60 +63,57 @@ export function useCalendarEvents(_calendarUrl?: string | null, refreshKey?: num
   }, [refreshKey, loadEvents]);
 
   /**
-   * 创建事件：写 events.md，UI 立即刷新。
-   * 若传 kanban payload，则同时在 工作搭子看板 创建任务并互填链接。
+   * 创建条目。
+   *
+   * kind 决定它出现在哪：task 同时出现在看板与日历，event 只在日历。
+   * 不再需要「同时创建看板任务」这种跨文件操作 —— 一条记录就够。
    */
   const createEvent = useCallback(
     async (
-      data: Omit<MdEvent, "uid" | "updated" | "source">,
-      kanban?: KanbanPayload,
-    ): Promise<MdEvent> => {
-      const r = await addMdEvent({ ...data, source: "md" }, kanban);
-      setEvents((prev) => {
-        const idx = prev.findIndex((e) => e.uid === r.event.uid);
-        if (idx >= 0) prev[idx] = r.event;
-        else prev.push(r.event);
-        return [...prev];
+      data: Partial<WorkbenchItem> & { title: string },
+    ): Promise<WorkbenchItem> => {
+      const r = await createItem({
+        kind: "event",
+        ...data,
       });
-      return r.event;
+      setEvents((prev) => [...prev, r]);
+      return r;
     },
     [],
   );
 
-  /**
-   * 更新事件（保留 kanbanTaskId 不被覆盖）
-   */
+  /** 更新条目 */
   const updateEvent = useCallback(
-    async (uid: string, patch: Partial<MdEvent>): Promise<MdEvent> => {
-      const r = await updateMdEvent(uid, patch);
-      setEvents((prev) => {
-        const idx = prev.findIndex((e) => e.uid === uid);
-        if (idx >= 0) prev[idx] = r.event;
-        return [...prev];
-      });
-      return r.event;
+    async (id: string, patch: Partial<WorkbenchItem>): Promise<WorkbenchItem> => {
+      const r = await updateItem(id, patch);
+      // 展开后的实例 id 形如 "abc@2026-10-05"，更新时要用原始 id
+      const originalId = r.instanceId || id.split("@")[0];
+      setEvents((prev) =>
+        prev.map((e) =>
+          (e.instanceId || e.id) === originalId ? { ...e, ...r } : e,
+        ),
+      );
+      return r;
     },
     [],
   );
 
   /**
-   * 删除事件：从 events.md 移除。
-   * 若 cascade=true 且事件本身绑定了 kanbanTaskId，连带删除看板任务；
-   * 否则后端会保留看板任务、仅解除绑定（避免误删）。
+   * 删除条目。
+   *
+   * 删一条就是删一条 —— 没有级联、没有解绑。
+   * 因为在统一数据源里不存在「绑定的另一份数据」。
    */
-  const deleteEvent = useCallback(
-    async (uid: string, cascade?: boolean) => {
-      await deleteMdEvent(uid);
-      setEvents((prev) => prev.filter((e) => e.uid !== uid));
-      // cascade 语义目前由后端根据 kanbanTaskId 自动判断，这里只是预留
-      void cascade;
-    },
-    [],
-  );
+  const deleteEvent = useCallback(async (id: string) => {
+    const originalId = id.split("@")[0];
+    await deleteItem(originalId);
+    setEvents((prev) => prev.filter((e) => (e.instanceId || e.id) !== originalId));
+  }, []);
 
-  /** 推送 events.md 到 CalDAV（如果配置了）。失败不影响本地数据 */
+  /** 推送数据源到 CalDAV（如果配置了）。失败不影响本地数据 */
   const pushToCaldav = useCallback(async () => {
     try {
+      const { syncMdToCaldav } = await import("../api/md-bridge");
       const r = await syncMdToCaldav({ direction: "push" });
       setLastSyncTime(Date.now());
       return r;
@@ -121,12 +123,12 @@ export function useCalendarEvents(_calendarUrl?: string | null, refreshKey?: num
     }
   }, []);
 
-  /** 拉取远程 CalDAV → events.md（保留本地优先：仅追加不覆盖） */
+  /** 拉取远程 CalDAV → 数据源（保留本地优先：仅追加不覆盖） */
   const pullFromCaldav = useCallback(async () => {
     try {
+      const { syncMdToCaldav } = await import("../api/md-bridge");
       const r = await syncMdToCaldav({ direction: "pull" });
       setLastSyncTime(Date.now());
-      // 拉取后重读本地
       await loadEvents();
       return r;
     } catch (err) {
@@ -138,6 +140,7 @@ export function useCalendarEvents(_calendarUrl?: string | null, refreshKey?: num
   /** 全量双向同步 */
   const bidirectionalSync = useCallback(async () => {
     try {
+      const { syncMdToCaldav } = await import("../api/md-bridge");
       const r = await syncMdToCaldav({ direction: "bidirectional" });
       setLastSyncTime(Date.now());
       await loadEvents();

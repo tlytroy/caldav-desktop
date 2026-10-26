@@ -2,6 +2,86 @@
 
 All notable changes to CalDAV Desktop are documented here.
 
+## [Unreleased] - 2026-10-26（架构重构）
+
+### 🔄 架构重构：统一数据源（workspace.md）
+
+**这是本项目最重要的一次架构调整。**
+
+用户指出：「日历里面比任务看板里面任务更多？体检在任务看板里就没找到？
+这两个不应该是同一个数据源吗？」—— 这个质疑是对的，暴露了旧架构的根本缺陷。
+
+#### 旧架构的问题
+
+旧设计用两个文件（`events.md` 事件 + `工作搭子看板.md` 任务），
+靠双向绑定字段（`kanbanTaskId` ↔ `日历:<uid>`）缝合。
+为了维持这个缝合，写了大量机制：双向绑定、级联删除、解绑、孤儿清理、
+两个方向的同步状态机。
+
+而根本问题是：**事件和任务本来就是同一个池子里的两类条目**，
+人为劈成两个文件再花代码缝合，是把简单问题复杂化。
+
+用户明确指出：「为什么你要搞什么同步之类的，我们就维护一个统一的数据源，
+然后各模块通过对这个数据源进行解析和编辑，形成任务/日历等等一系列的，
+不是更好吗？唯一要转换的只有 md 文件和 ics 的转换」
+
+#### 新架构
+
+```
+workspace.md（唯一事实源）
+     │
+     ├── scope=calendar + expand=true  →  日历模块
+     ├── scope=board                    →  任务看板模块
+     └── scope=all                      →  工作台 / AI 工具
+```
+
+- **`kind: task | event` 只是标签，不是隔离** ——
+  `kind: task` 且有 `start` 的条目同时出现在看板和日历，指向同一个 id
+- **没有绑定字段、没有级联删除、没有解绑** —— 删一条就是删一条
+- 文件名用英文（`workspace.md`），避免中文文件名在跨平台/工具链上的问题
+
+#### 周期规则（RRULE，RFC 5545 子集）
+
+新增 `apps/server/src/recurrence.ts`：
+- 支持每天 / 每周 / 每周一三五 / 每月 / 每月1号 / 每年
+- 支持 BYDAY / BYMONTHDAY / INTERVAL / COUNT / UNTIL
+- 日历侧按 RRULE 展开成多个实例渲染
+
+用 RFC 5545 而非自定义枚举，是因为它能表达「每周一三五」这类规则，
+且导出 ICS 时可直接映射到 RRULE 行不丢信息。
+
+#### 防 AI 乱改的三层防护
+
+1. **Schema 校验**（`schema/item.schema.json`）：写入前校验类型/枚举/格式
+2. **容错解析**：逐条自解析（不用 YAML 库），一条坏记录不影响其余 499 条
+3. **写入前备份**：`.workspace-backups/` 保留最近 10 版
+
+核心洞察：**说明文档是软约束，工具 schema 才是硬约束**。
+AI 走 `/api/workspace/items` 接口时，格式由代码保证，不依赖 AI 自觉。
+
+#### 迁移工具
+
+新增 `scripts/migrate-to-workspace.js`，把旧的两个文件合并到 workspace.md：
+- 事件 → `kind: event`，任务 → `kind: task`
+- **已绑定的对合并成一条**（两个方向都匹配 —— 旧架构的绑定键不一致：
+  事件侧用 `kanbanTaskId` 指向任务，任务侧用 `日历:<uid>` 指向事件）
+- 项目与速记 → 自由笔记区
+
+#### 新增 API
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/api/workspace/items` | 列表（scope / kind / start / end / expand） |
+| POST | `/api/workspace/items` | 创建（schema 校验） |
+| PUT | `/api/workspace/items/:id` | 更新（字段白名单） |
+| DELETE | `/api/workspace/items/:id` | 删除 |
+| GET | `/api/workspace/validation` | 校验报告 |
+| GET | `/api/workspace/info` | 文件位置与统计 |
+| GET | `/api/workspace/recurrence/options` | 周期规则选项 |
+| GET | `/api/workspace/recurrence/preview` | 预览周期展开结果 |
+
+---
+
 ## [Unreleased] - 2026-10-26
 
 ### 🐛 实测发现的 Bug（此前只有单元测试，没有真实跑过）

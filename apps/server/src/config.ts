@@ -92,9 +92,15 @@ export interface AppConfig {
    * 因为容器部署时通常用环境变量指定挂载位置。
    */
   paths: {
-    /** 事件文件（相对路径基于进程 cwd） */
+    /**
+     * 统一数据源文件（workspace.md）。
+     *
+     * 事件与任务在同一个条目池里，日历 / 看板 / 快速创建都只是它的视图。
+     */
+    workspaceFile: string;
+    /** @deprecated 旧的事件文件，迁移用 */
     eventsFile: string;
-    /** 工作搭子看板文件 */
+    /** @deprecated 旧的工作搭子看板文件，迁移用 */
     kanbanFile: string;
   };
 }
@@ -135,6 +141,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     parserLocale: "zh-CN",
   },
   paths: {
+    workspaceFile: "./workspace.md",
     eventsFile: "./events.md",
     kanbanFile: "./工作搭子看板.md",
   },
@@ -402,9 +409,14 @@ export function getSecret(field: SecretField): string {
  * 相对路径基于**进程 cwd** 解析（与 .env 里的写法一致）。
  */
 export function resolveDataPath(
-  kind: "events" | "kanban",
+  kind: "workspace" | "events" | "kanban",
 ): string {
-  const envKey = kind === "events" ? "MD_EVENTS_FILE" : "KANBAN_FILE_PATH";
+  const envKey =
+    kind === "workspace"
+      ? "WORKSPACE_FILE"
+      : kind === "events"
+        ? "MD_EVENTS_FILE"
+        : "KANBAN_FILE_PATH";
   const envVal = process.env[envKey];
   if (envVal && envVal.trim()) {
     const p = envVal.trim();
@@ -413,7 +425,11 @@ export function resolveDataPath(
 
   const cfg = getConfig();
   const raw =
-    (kind === "events" ? cfg.paths?.eventsFile : cfg.paths?.kanbanFile) || "";
+    (kind === "workspace"
+      ? cfg.paths?.workspaceFile
+      : kind === "events"
+        ? cfg.paths?.eventsFile
+        : cfg.paths?.kanbanFile) || "";
   if (raw.trim()) {
     const p = raw.trim();
     return path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
@@ -421,7 +437,11 @@ export function resolveDataPath(
 
   return path.resolve(
     process.cwd(),
-    kind === "events" ? "events.md" : "工作搭子看板.md",
+    kind === "workspace"
+      ? "workspace.md"
+      : kind === "events"
+        ? "events.md"
+        : "工作搭子看板.md",
   );
 }
 

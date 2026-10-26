@@ -1,0 +1,486 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
+import {
+  parseWorkspace,
+  serializeWorkspace,
+  readWorkspace,
+  writeWorkspace,
+  validateItem,
+  buildValidationReport,
+  filterItems,
+  newItemId,
+  type WorkbenchItem,
+} from "../workspace.js";
+
+const SAMPLE = `---
+schema: workbench/v1
+---
+
+## 2026-10-28 体检
+- id: a1b2c3d4
+- kind: task
+- start: 2026-10-28T09:00:00
+- end: 2026-10-28T10:00:00
+- priority: mid
+- done: false
+
+## 每周一三五 晨会
+- id: b2c3d4e5
+- kind: event
+- start: 2026-10-05T09:00:00
+- end: 2026-10-05T10:00:00
+- recurrence: FREQ=WEEKLY;BYDAY=MO,WE,FR
+- status: confirmed
+`;
+
+describe("workspace.md 解析", () => {
+  it("解析多条条目", () => {
+    const ws = parseWorkspace(SAMPLE);
+    expect(ws.items).toHaveLength(2);
+    expect(ws.items[0].title).toBe("2026-10-28 体检");
+    expect(ws.items[0].kind).toBe("task");
+    expect(ws.items[0].start).toBe("2026-10-28T09:00:00");
+    expect(ws.items[1].recurrence).toBe("FREQ=WEEKLY;BYDAY=MO,WE,FR");
+  });
+
+  it("标题取自 H2（无需显式 title 字段）", () => {
+    const ws = parseWorkspace(SAMPLE);
+    expect(ws.items[0].title).toContain("体检");
+    expect(ws.items[0].title).not.toBe("");
+  });
+
+  it("容错：一条坏数据不影响其他条目", () => {
+    const broken = `---
+schema: workbench/v1
+---
+
+## 正常条目
+- id: 11111111
+- kind: task
+- start: 2026-10-01T09:00:00
+
+## 坏条目
+- id: 22222222
+- kind: 不存在的类型
+- start: 不是时间
+- priority: 瞎写的
+
+## 另一条正常
+- id: 33333333
+- kind: event
+- start: 2026-10-02T09:00:00
+`;
+    const ws = parseWorkspace(broken);
+    expect(ws.items).toHaveLength(3);
+
+    // 坏条目被标记，但仍在结果里
+    const bad = ws.items.find((i) => i.id === "22222222")!;
+    expect(bad.errors).toBeDefined();
+    expect(bad.errors!.length).toBeGreaterThan(0);
+
+    // 其它条目完全正常
+    const good1 = ws.items.find((i) => i.id === "11111111")!;
+    const good2 = ws.items.find((i) => i.id === "33333333")!;
+    expect(good1.errors).toBeUndefined();
+    expect(good2.errors).toBeUndefined();
+    expect(good1.start).toBe("2026-10-01T09:00:00");
+  });
+
+  it("容错：缺少 id 只标记该条", () => {
+    const ws = parseWorkspace(`## 无 id
+
+- kind: task
+`);
+    expect(ws.items).toHaveLength(1);
+    expect(ws.items[0].errors).toBeDefined();
+    expect(ws.items[0].errors!.some((e) => e.includes("id"))).toBe(true);
+  });
+
+  it("非法 kind / priority / 时间都被标出", () => {
+    const ws = parseWorkspace(`## 坏数据
+- id: 44444444
+- kind: xxx
+- priority: yyy
+- start: zzz
+`);
+    const errs = ws.items[0].errors ?? [];
+    expect(errs.some((e) => e.includes("kind"))).toBe(true);
+    expect(errs.some((e) => e.includes("priority"))).toBe(true);
+    expect(errs.some((e) => e.includes("start"))).toBe(true);
+  });
+
+  it("兼容中文优先级", () => {
+    const ws = parseWorkspace(`## 中文优先级
+- id: 55555555
+- kind: task
+- priority: 高
+`);
+    expect(ws.items[0].priority).toBe("high");
+  });
+
+  it("归一化时间：缺秒补秒，容忍空格分隔", () => {
+    const ws = parseWorkspace(`## 时间格式
+- id: 66666666
+- kind: task
+- start: 2026-10-01 09:30
+`);
+    expect(ws.items[0].start).toBe("2026-10-01T09:30:00");
+  });
+
+  it("end 不晚于 start 被标记", () => {
+    const ws = parseWorkspace(`## 时间倒置
+- id: 77777777
+- kind: task
+- start: 2026-10-01T10:00:00
+- end: 2026-10-01T09:00:00
+`);
+    expect(ws.items[0].errors!.some((e) => e.includes("end"))).toBe(true);
+  });
+
+  it("解析 frontmatter 与正文", () => {
+    const ws = parseWorkspace(`---
+schema: workbench/v1
+---
+
+## 条目
+- id: 88888888
+- kind: task
+
+<!-- notes -->
+这里是自由笔记
+`);
+    expect(ws.items).toHaveLength(1);
+    expect(ws.notes).toContain("这里是自由笔记");
+  });
+
+  it("notes 标记之后的内容不再被当作条目", () => {
+    const ws = parseWorkspace(`## 条目一
+- id: 11111111
+- kind: task
+
+<!-- notes -->
+## 这不是条目
+随便写
+`);
+    expect(ws.items).toHaveLength(1);
+    expect(ws.notes).toContain("这不是条目");
+  });
+
+  it("空文件返回空集合", () => {
+    const ws = parseWorkspace("");
+    expect(ws.items).toHaveLength(0);
+  });
+
+  it("空行不会截断条目", () => {
+    const ws = parseWorkspace(`## 多字段
+
+- id: 99999999
+- kind: task
+
+- start: 2026-10-01T09:00:00
+`);
+    expect(ws.items).toHaveLength(1);
+    expect(ws.items[0].start).toBe("2026-10-01T09:00:00");
+  });
+});
+
+describe("序列化与往返", () => {
+  it("序列化后再解析，字段不丢", () => {
+    const item: WorkbenchItem = {
+      id: "abc12345",
+      kind: "task",
+      title: "竞聘 PPT 终稿",
+      start: "2026-10-28T09:00:00",
+      end: "2026-10-28T11:00:00",
+      due: "2026-10-28",
+      priority: "high",
+      done: false,
+      recurrence: "FREQ=WEEKLY;BYDAY=MO,WE,FR",
+      project: "竞聘",
+      tags: ["重要", "对外"],
+      description: "先过一遍逻辑",
+      location: "张江",
+      status: "confirmed",
+    };
+    const text = serializeWorkspace([item]);
+    const ws = parseWorkspace(text);
+    expect(ws.items).toHaveLength(1);
+    const back = ws.items[0];
+    expect(back.id).toBe(item.id);
+    expect(back.kind).toBe(item.kind);
+    expect(back.title).toBe(item.title);
+    expect(back.start).toBe(item.start);
+    expect(back.end).toBe(item.end);
+    expect(back.due).toBe(item.due);
+    expect(back.priority).toBe(item.priority);
+    expect(back.recurrence).toBe(item.recurrence);
+    expect(back.project).toBe(item.project);
+    expect(back.tags).toEqual(item.tags);
+    expect(back.description).toBe(item.description);
+    expect(back.location).toBe(item.location);
+  });
+
+  it("未完成的排在已完成前面", () => {
+    const text = serializeWorkspace([
+      { id: "aaaaaaaa", kind: "task", title: "已完成", done: true },
+      { id: "bbbbbbbb", kind: "task", title: "未完成", done: false },
+    ]);
+    const ws = parseWorkspace(text);
+    expect(ws.items[0].title).toBe("未完成");
+    expect(ws.items[1].title).toBe("已完成");
+  });
+
+  it("输出包含 schema 声明", () => {
+    const text = serializeWorkspace([]);
+    expect(text).toContain("schema: workbench/v1");
+  });
+
+  it("保留自由备注", () => {
+    const text = serializeWorkspace([], "## 我的笔记\n随便写");
+    const ws = parseWorkspace(text);
+    expect(ws.notes).toContain("我的笔记");
+  });});
+
+describe("文件读写与备份", () => {
+  let tmp: string;
+  let wsFile: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ws-test-"));
+    wsFile = path.join(tmp, "workspace.md");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("写入后能读回", () => {
+    writeWorkspace(
+      [{ id: "cccccccc", kind: "task", title: "测试", start: "2026-10-01T09:00:00" }],
+      undefined,
+      wsFile,
+    );
+    const ws = readWorkspace(wsFile);
+    expect(ws.items).toHaveLength(1);
+    expect(ws.items[0].title).toBe("测试");
+  });
+
+  it("文件不存在时返回空集合而不是抛错", () => {
+    const ws = readWorkspace(path.join(tmp, "不存在.md"));
+    expect(ws.items).toHaveLength(0);
+  });
+
+  it("第二次写入会生成备份", () => {
+    writeWorkspace([{ id: "dddddddd", kind: "task", title: "第一版" }], undefined, wsFile);
+    writeWorkspace([{ id: "eeeeeeee", kind: "task", title: "第二版" }], undefined, wsFile);
+
+    const backupFiles = fs.readdirSync(path.join(tmp, ".workspace-backups"));
+    expect(backupFiles.length).toBeGreaterThanOrEqual(1);
+    const backupContent = fs.readFileSync(
+      path.join(tmp, ".workspace-backups", backupFiles[0]),
+      "utf-8",
+    );
+    expect(backupContent).toContain("第一版");
+  });
+
+  it("备份保留有限份数", () => {
+    for (let i = 0; i < 15; i++) {
+      writeWorkspace(
+        [{ id: "ffffffff", kind: "task", title: `第${i}版` }],
+        undefined,
+        wsFile,
+      );
+    }
+    const backupFiles = fs.readdirSync(path.join(tmp, ".workspace-backups"));
+    expect(backupFiles.length).toBeLessThanOrEqual(10);
+  });
+});
+
+describe("校验", () => {
+  it("合法条目通过", () => {
+    expect(
+      validateItem({
+        id: "12345678",
+        kind: "task",
+        title: "合法",
+        start: "2026-10-01T09:00:00",
+      }),
+    ).toEqual([]);
+  });
+
+  it("拒绝非法 id", () => {
+    expect(validateItem({ id: "X", kind: "task", title: "x" }).length).toBeGreaterThan(0);
+    expect(validateItem({ id: "123", kind: "task", title: "x" }).length).toBeGreaterThan(0);
+  });
+
+  it("拒绝非法 kind / priority", () => {
+    expect(
+      validateItem({ id: "12345678", kind: "x" as any, title: "x" }).some((e) =>
+        e.includes("kind"),
+      ),
+    ).toBe(true);
+    expect(
+      validateItem({
+        id: "12345678",
+        kind: "task",
+        title: "x",
+        priority: "urgent" as any,
+      }).some((e) => e.includes("priority")),
+    ).toBe(true);
+  });
+
+  it("拒绝未知字段（防 AI 乱写）", () => {
+    const errs = validateItem({
+      id: "12345678",
+      kind: "task",
+      title: "x",
+      恶意字段: "y",
+    } as any);
+    expect(errs.some((e) => e.includes("未知字段"))).toBe(true);
+  });
+
+  it("拒绝非法时间与 RRULE", () => {
+    expect(
+      validateItem({
+        id: "12345678",
+        kind: "task",
+        title: "x",
+        start: "2026/10/01",
+      }).some((e) => e.includes("start")),
+    ).toBe(true);
+    expect(
+      validateItem({
+        id: "12345678",
+        kind: "task",
+        title: "x",
+        recurrence: "FREQ=HOURLY",
+      }).some((e) => e.includes("recurrence")),
+    ).toBe(true);
+  });
+
+  it("校验报告统计有效/无效条目", () => {
+    const ws = parseWorkspace(`## 好的
+- id: 11111111
+- kind: task
+
+## 坏的
+- id: 22222222
+- kind: 瞎写
+`);
+    const report = buildValidationReport(ws);
+    expect(report.total).toBe(2);
+    expect(report.valid).toBe(1);
+    expect(report.invalid).toBe(1);
+    expect(report.issues).toHaveLength(1);
+  });
+
+  it("检测 id 重复", () => {
+    const ws = parseWorkspace(`## 甲
+- id: 11111111
+- kind: task
+
+## 乙
+- id: 11111111
+- kind: task
+`);
+    const report = buildValidationReport(ws);
+    expect(report.invalid).toBe(2);
+    expect(report.issues.some((i) => i.errors.some((e) => e.includes("重复")))).toBe(
+      true,
+    );
+  });
+});
+
+describe("模块视图筛选", () => {
+  const items: WorkbenchItem[] = [
+    {
+      id: "11111111",
+      kind: "task",
+      title: "任务有开始时间",
+      start: "2026-10-01T09:00:00",
+      done: false,
+    },
+    {
+      id: "22222222",
+      kind: "event",
+      title: "纯事件",
+      start: "2026-10-02T09:00:00",
+    },
+    {
+      id: "33333333",
+      kind: "task",
+      title: "任务无时间",
+      done: false,
+    },
+    {
+      id: "44444444",
+      kind: "task",
+      title: "已完成",
+      start: "2026-10-03T09:00:00",
+      done: true,
+    },
+  ];
+
+  it("日历视图 = 有 start 的条目（任务与事件都算）", () => {
+    const cal = filterItems(items, { scope: "calendar" });
+    expect(cal).toHaveLength(3);
+    expect(cal.map((i) => i.id)).toContain("11111111");
+    expect(cal.map((i) => i.id)).toContain("22222222");
+    expect(cal.map((i) => i.id)).not.toContain("33333333");
+  });
+
+  it("看板视图 = kind=task", () => {
+    const board = filterItems(items, { scope: "board" });
+    expect(board).toHaveLength(3);
+    expect(board.every((i) => i.kind === "task")).toBe(true);
+  });
+
+  it("这正是用户遇到的问题的解法：任务出现在两个视图里", () => {
+    const cal = filterItems(items, { scope: "calendar" });
+    const board = filterItems(items, { scope: "board" });
+    const calIds = cal.map((i) => i.id);
+    const boardIds = board.map((i) => i.id);
+    // 有时间的任务同时出现在两边
+    expect(calIds).toContain("11111111");
+    expect(boardIds).toContain("11111111");
+  });
+
+  it("按日期范围过滤", () => {
+    const r = filterItems(items, {
+      scope: "calendar",
+      start: "2026-10-02",
+      end: "2026-10-02",
+    });
+    expect(r).toHaveLength(1);
+    expect(r[0].id).toBe("22222222");
+  });
+
+  it("排除已完成", () => {
+    const r = filterItems(items, { scope: "calendar", includeDone: false });
+    expect(r.map((i) => i.id)).not.toContain("44444444");
+  });
+
+  it("坏条目不会出现在任何视图里", () => {
+    const broken = parseWorkspace(`## 坏的
+- id: 99999999
+- kind: 瞎写
+`);
+    expect(filterItems(broken.items, { scope: "calendar" })).toHaveLength(0);
+    expect(filterItems(broken.items, { scope: "board" })).toHaveLength(0);
+  });
+});
+
+describe("id 生成", () => {
+  it("生成 8 位十六进制 id", () => {
+    for (let i = 0; i < 50; i++) {
+      expect(newItemId()).toMatch(/^[0-9a-f]{8}$/);
+    }
+  });
+
+  it("不重复", () => {
+    const set = new Set(Array.from({ length: 200 }, () => newItemId()));
+    expect(set.size).toBe(200);
+  });
+});

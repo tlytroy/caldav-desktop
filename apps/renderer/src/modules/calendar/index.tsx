@@ -1,37 +1,29 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { AlertTriangle } from "lucide-react";
 import Calendar from "../../components/Calendar";
 import QuickCreate from "../../components/QuickCreate";
-import { fetchKanban, type KanbanTodo } from "../../api/kanban";
-import { addMdEvent } from "../../api/md-bridge";
-import type { MdEvent } from "../../api/md-bridge";
 import {
   subscribeSyncDegraded,
   getSyncDegradedReason,
 } from "../../api/calendar";
 
-const PRIORITY_COLOR: Record<KanbanTodo["priority"], string> = {
-  高: "#ef4444",
-  中: "#f59e0b",
-  低: "#14b8a6",
-};
-
 /**
- * CalendarPage - 日历模块页面
+ * CalendarPage —— 日历模块
  *
- * 顶部是自然语言快速创建条（类 Fantastical 交互），下方是月/周/日视图。
- * 快速创建与日历共用 events.md 作为事实源 —— 解析确认后直接调
- * POST /api/md-bridge/events/add 落盘，与手动创建走同一条写入路径。
+ * ## 架构
  *
- * 同时叠加「工作搭子看板」中**未绑定日历**的任务。
- * 已绑定日历的任务（calendarEventUid 有值）会作为独立事件出现在日历上，
- * 这里只展示剩余的、仅有截止日的待办，避免重复。
+ * 日历是**统一数据源（workspace.md）的一个视图**，不是独立的数据源。
+ * 筛选条件由服务端完成：scope=calendar + expand=true
+ * （后者把「每周一三五」这类重复条目展开成月视图里的多个格子）。
+ *
+ * 因此这里**不需要**再叠加看板任务 —— 有 start 的任务本来就在日历上。
+ * 这正是统一数据源带来的好处：同一个「体检」在看板和日历里指向同一条记录，
+ * 不存在"日历有、看板没有"的差异。
  */
 export default function CalendarPage() {
-  const [todos, setTodos] = useState<KanbanTodo[]>([]);
-  // 每次快速创建后自增，触发 Calendar 重读 events.md
+  // 每次快速创建后自增，触发日历重读数据源
   const [refreshKey, setRefreshKey] = useState(0);
-  // CalDAV 不可用时的降级提示（本地 md 数据照常可用）
+  // CalDAV 不可用时的降级提示（本地数据不受影响）
   const [syncDegraded, setSyncDegraded] = useState<string | null>(
     getSyncDegradedReason(),
   );
@@ -43,66 +35,36 @@ export default function CalendarPage() {
     };
   }, []);
 
-  const loadTodos = useCallback(() => {
-    fetchKanban()
-      .then((d) => setTodos(d.todos || []))
-      .catch(() => setTodos([]));
-  }, []);
-
-  useEffect(() => {
-    loadTodos();
-  }, [loadTodos]);
-
-  // 快速创建写盘后刷新看板叠加层
-  useEffect(() => {
-    if (refreshKey > 0) loadTodos();
-  }, [refreshKey, loadTodos]);
-
-  /** 自然语言快速创建：确认草稿后写入 events.md */
-  const handleQuickCreate = async (draft: {
-    title: string;
-    date: string;
-    end?: string;
-    allDay: boolean;
-    recurrence?: string;
-    description?: string;
-    addToKanban: boolean;
-  }) => {
-    const payload: MdEvent = {
-      title: draft.title,
-      date: draft.date,
-      end: draft.end,
-      allDay: draft.allDay,
-      recurrence: draft.recurrence as MdEvent["recurrence"],
-      description: draft.description,
-      source: "md",
-    };
-    // 可选：同时在工作搭子看板建一条任务（后端会互填链接字段）
-    const kanban = draft.addToKanban
-      ? {
-          priority: ("中" as const),
-          due: draft.date.slice(0, 10),
-        }
-      : undefined;
-
-    await addMdEvent(payload, kanban);
-    setRefreshKey((k) => k + 1);
-  };
-
-  const externalEvents = useMemo(
-    () =>
-      todos
-        .filter((t) => !t.done && t.due && !t.calendarEventUid)
-        .map((t) => ({
-          id: `kanban-${t.id}`,
-          title: `[任务] ${t.title}`,
-          start: t.due,
-          allDay: true,
-          backgroundColor: PRIORITY_COLOR[t.priority],
-          borderColor: PRIORITY_COLOR[t.priority],
-          extendedProps: { kanban: true, priority: t.priority, taskId: t.id },
-        })),
-    [todos],
+  /** 自然语言快速创建：确认草稿后写入统一数据源 */
+  const handleQuickCreate = useCallback(
+    async (draft: {
+      title: string;
+      date: string;
+      end?: string;
+      allDay: boolean;
+      recurrence?: string;
+      description?: string;
+      /** 勾选后写成任务类型（同时出现在看板） */
+      addToKanban: boolean;
+    }) => {
+      // 延迟导入，避免把 API 客户端塞进首屏 bundle
+      const { createItem } = await import("../../api/workspace");
+      await createItem({
+        title: draft.title,
+        // 草稿的时间是本地时间串，直接用（不要转 ISO —— 会带 Z 导致偏移）
+        start: draft.date,
+        end: draft.end,
+        allDay: draft.allDay,
+        description: draft.description,
+        recurrence: draft.recurrence || undefined,
+        // 勾了「加入任务看板」就是 task 类型，否则是纯事件
+        kind: draft.addToKanban ? "task" : "event",
+        priority: draft.addToKanban ? "mid" : undefined,
+        due: draft.addToKanban ? draft.date.slice(0, 10) : undefined,
+      });
+      setRefreshKey((k) => k + 1);
+    },
+    [],
   );
 
   return (
@@ -110,7 +72,7 @@ export default function CalendarPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">日历</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          快速说一句就建好 · 看板任务（带截止日 & 未绑定日历）也会叠加显示
+          快速说一句就建好 · 与任务看板共用同一个数据源，任务与事件只存一份
         </p>
       </div>
 
@@ -123,14 +85,14 @@ export default function CalendarPage() {
           <div className="text-amber-700 dark:text-amber-300">
             <span className="font-medium">CalDAV 同步暂不可用</span>
             <span className="block text-xs mt-0.5">
-              {syncDegraded} —— 本地 events.md 与任务看板照常可用，
+              {syncDegraded} —— 本地数据源与任务看板照常可用，
               事件会正常显示和保存；只是不会与日历服务器互相同步。
             </span>
           </div>
         </div>
       )}
 
-      <Calendar externalEvents={externalEvents} refreshKey={refreshKey} />
+      <Calendar refreshKey={refreshKey} />
     </div>
   );
 }

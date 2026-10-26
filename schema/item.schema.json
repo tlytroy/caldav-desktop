@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://workbench.local/schema/item.schema.json",
+  "title": "Workbench Item",
+  "description": "Single entry in workspace.md. Every entry describes one thing you need to do or attend to. Modules (calendar / board / quick-create) are views over this same entry pool - there is no separate task table.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "kind", "title"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Stable identifier. Never reuse. Format: 8 lowercase hex chars.",
+      "pattern": "^[0-9a-f]{8}$"
+    },
+    "kind": {
+      "type": "string",
+      "description": "Entry type. 'task' = something to finish; 'event' = something to attend. A task with a start time shows up in BOTH the board and the calendar.",
+      "enum": ["task", "event"]
+    },
+    "title": {
+      "type": "string",
+      "description": "Short human-readable title.",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "start": {
+      "type": "string",
+      "description": "Start datetime in LOCAL time, no timezone suffix. Format YYYY-MM-DDTHH:mm:ss.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?$"
+    },
+    "end": {
+      "type": "string",
+      "description": "End datetime in LOCAL time, no timezone suffix. Must be after start.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?$"
+    },
+    "due": {
+      "type": "string",
+      "description": "Deadline date for tasks (YYYY-MM-DD). Optional.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "allDay": {
+      "type": "boolean",
+      "description": "True for all-day entries."
+    },
+    "done": {
+      "type": "boolean",
+      "description": "Completion state. Only meaningful for kind=task."
+    },
+    "priority": {
+      "type": "string",
+      "description": "Task priority.",
+      "enum": ["high", "mid", "low"]
+    },
+    "recurrence": {
+      "type": "string",
+      "description": "RFC 5545 RRULE subset. Supported: FREQ=DAILY | WEEKLY | MONTHLY | YEARLY, plus BYDAY (MO,TU,WE,TH,FR,SA,SU), BYMONTHDAY (1-31), INTERVAL, COUNT, UNTIL.",
+      "pattern": "^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;.*)?$"
+    },
+    "project": {
+      "type": "string",
+      "description": "Project or category this entry belongs to.",
+      "maxLength": 100
+    },
+    "tags": {
+      "type": "array",
+      "description": "Free-form labels.",
+      "items": { "type": "string", "maxLength": 50 }
+    },
+    "description": {
+      "type": "string",
+      "description": "Longer free text / notes.",
+      "maxLength": 4000
+    },
+    "location": {
+      "type": "string",
+      "description": "Where it happens.",
+      "maxLength": 200
+    },
+    "status": {
+      "type": "string",
+      "description": "Calendar-style status.",
+      "enum": ["confirmed", "tentative", "cancelled", "needs-action"]
+    },
+    "createdAt": {
+      "type": "string",
+      "description": "ISO timestamp of creation. Read-only for AI tools.",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "description": "ISO timestamp of last modification. Read-only for AI tools.",
+      "format": "date-time"
+    }
+  }
+}

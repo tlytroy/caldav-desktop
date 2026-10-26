@@ -6,6 +6,29 @@ Built with the help of AI assistance, this project addresses the lack of standal
 
 ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Status](https://img.shields.io/badge/status-production%20ready-green)
 
+## 🗂 统一数据源
+
+**唯一事实源 = 一个文件：`workspace.md`。**
+
+日历、任务看板、快速创建都只是这个文件的**视图**（不同筛选条件），
+不各自维护数据再互相同步。
+
+```
+workspace.md（唯一事实源）
+     │
+     ├── scope=calendar + expand=true  →  日历模块
+     ├── scope=board                    →  任务看板模块
+     └── scope=all                      →  工作台 / AI 工具
+```
+
+- 一条记录带 `kind: task | event`，但 **kind 只是标签不是隔离** ——
+  `kind: task` 且有 `start` 的条目**同时**出现在看板和日历，指向同一个 id
+- **没有绑定字段、没有级联删除、没有解绑** —— 删一条就是删一条
+- 唯一需要格式转换的是 **md ↔ ics**（ics 是标准格式，无法自定义）
+- 三层防护防 AI 乱改：schema 校验 / 容错解析（一条坏不影响其余）/ 写入前备份
+
+详见 [REF/DATA_SOURCE.md](REF/DATA_SOURCE.md)。
+
 ## ✨ Features
 
 - **CalDAV Sync**: Full synchronization with Radicale servers (RFC 5545 compliant)
@@ -350,12 +373,13 @@ radicale-desktop/
   - [x] 旧 AppShell 保留为回退路径（`useModularUI` 开关）
   - [ ] settings 独立成模块（当前仍是 SettingsModal 组件）
   - [ ] roadmap 独立成模块
-- **Phase 3: MD 文件层**
-  - [x] events.md 读写（YAML frontmatter）
-  - [x] 工作搭子看板.md 读写（待办 / 项目 / 速记）
+- **Phase 3: 统一数据源**
+  - [x] workspace.md 单文件条目池（事件 + 任务同一个池子）
+  - [x] 容错解析（一条坏数据不影响其余）+ schema 校验 + 写入前备份
   - [x] iCalendar 文件导入（多事件、dryRun 预览、按 uid 去重）
   - [x] iCalendar 文件导出（单文件 VCALENDAR、可按日期范围过滤）
-  - [x] WebDAV 通道（直接同步双 md 文件，ETag 冲突检测 + 自动备份）
+  - [x] WebDAV 通道（ETag 冲突检测 + 自动备份）
+  - [x] 从 events.md + 工作搭子看板.md 迁移（已绑定的对自动合并成一条）
 - **Phase 4: CalDAV 同步**
   - [x] MD → ICS 转换
   - [x] push / pull / 双向同步，pull 保留本地 `kanbanTaskId`
@@ -363,10 +387,11 @@ radicale-desktop/
   - [x] 同步方向枚举归一化（`md-to-caldav` / `push` 等表述统一）
   - [~] 增量同步：目前按全量 events 遍历，未做 `updated` 级增量
   - [~] 冲突检测：仅基于 `updated` 时间戳的基础版
-- **Phase 5: 双向绑定**
-  - [x] 任务 ↔ 事件互链（看板 `日历:<uid>` ↔ events.md `kanbanTaskId`）
-  - [x] 级联删除 / 解绑保留
-  - [x] `X-KANBAN-TASK-ID` 扩展属性保证同步往返不丢关联
+- **Phase 5: 周期规则**
+  - [x] RRULE 解析与展开（RFC 5545 子集）
+  - [x] 每天 / 每周 / 每周一三五 / 每月 / 每月1号 / 每年
+  - [x] INTERVAL / COUNT / UNTIL 支持
+  - [x] 日历侧按 RRULE 展开渲染
 - **Phase 6: 占位模块**
   - [x] git-sync / ai-agent / notifications 三模块已注册（status=placeholder）
   - [x] 自然语言快速创建（本地规则 + AI 兜底 + 语音输入）

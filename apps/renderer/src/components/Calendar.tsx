@@ -16,7 +16,6 @@ import {
   Cloud,
   CloudOff,
   RefreshCw,
-  ListTodo,
   Upload,
   Download,
   HardDrive,
@@ -25,7 +24,8 @@ import {
   AlertTriangle,
   Check,
 } from 'lucide-react';
-import type { MdEvent } from '../api/md-bridge';
+import type { WorkbenchItem } from '../api/workspace';
+import { fetchRecurrenceOptions, type RecurrenceOption } from '../api/workspace';
 import {
   importIcsFile,
   exportIcsDownloadUrl,
@@ -40,42 +40,42 @@ import {
   type WebDAVSyncResult,
 } from '../api/webdav';
 
-/** events.md 里 priority 是 high/medium/low，映射成日历色块 */
-const MD_PRIORITY_COLOR: Record<'high' | 'medium' | 'low', string> = {
+/** 优先级 → 日历色块 */
+const MD_PRIORITY_COLOR: Record<'high' | 'mid' | 'low', string> = {
   high: '#ef4444',
-  medium: '#f59e0b',
+  mid: '#f59e0b',
   low: '#14b8a6',
 };
 
 interface CalendarProps {
   calendarUrl?: string;
-  externalEvents?: any[];
-  /** 外部数据变更时自增，触发重读 events.md（用于快速创建后刷新） */
+  /** 外部数据变更时自增，触发重读数据源（用于快速创建后刷新） */
   refreshKey?: number;
 }
 
 /**
- * MdEvent → FullCalendar 事件对象
+ * WorkbenchItem → FullCalendar 事件对象
  *
- * 关键：events.md 里事件用的是 `date` / `end`，而 FullCalendar 只认 `start` / `end`。
- * 之前直接把 MdEvent 展开丢进去，导致所有字段对不上 —— 日历上一个事件都不显示。
+ * 数据源是统一的 workspace.md，事件与任务在同一个条目池里。
+ * 任务的 id 在展开重复规则后会变成 "abc@2026-10-05" 的形式
+ * （同一条目在不同日期的多个实例），这里保留原始 id 供更新/删除使用。
  */
-function toFullCalendarEvent(e: MdEvent) {
+function toFullCalendarEvent(e: WorkbenchItem) {
   const color = e.priority ? MD_PRIORITY_COLOR[e.priority] : '#3b82f6';
   return {
-    id: e.uid,
+    id: e.id,
     title: e.title,
-    start: e.date,
+    start: e.start,
     // 全天事件若 end 与 start 同日，FullCalendar 需要至少一天的跨度才显示
-    end: e.end && e.end !== e.date ? e.end : undefined,
+    end: e.end && e.end !== e.start ? e.end : undefined,
     allDay: !!e.allDay,
     backgroundColor: color,
     borderColor: color,
-    extendedProps: { mdEvent: e },
+    extendedProps: { item: e },
   };
 }
 
-export default function Calendar({ calendarUrl, externalEvents, refreshKey }: CalendarProps) {
+export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
   const {
     events,
     loadingState,
@@ -104,9 +104,7 @@ export default function Calendar({ calendarUrl, externalEvents, refreshKey }: Ca
     category?: any;
     tags: any[];
     recurrence?: any;
-    kanbanTaskId?: string;
-    addToKanban?: boolean;
-    kanbanPriority?: "高" | "中" | "低";
+    kind?: 'task' | 'event';
   }>({
     title: '',
     start: new Date(),
@@ -115,9 +113,12 @@ export default function Calendar({ calendarUrl, externalEvents, refreshKey }: Ca
     description: '',
     tags: [],
   });
+  // 重复规则选项（从服务端取，保证 RRULE 表述一致）
+  const [recurrenceOptions, setRecurrenceOptions] = useState<RecurrenceOption[]>([
+    { value: '', label: '不重复' },
+  ]);
   // 删除确认
-  const [pendingDelete, setPendingDelete] = useState<{ uid: string; title: string; kanbanTaskId?: string } | null>(null);
-  const [deleteLinkedTask, setDeleteLinkedTask] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState<{ uid: string; title: string } | null>(null);
 
   // ===== iCalendar 导入 / 导出 =====
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -214,7 +215,14 @@ export default function Calendar({ calendarUrl, externalEvents, refreshKey }: Ca
   /** 有冲突时先提示，避免用户盲目 force 覆盖 */
   const hasConflict = webdavResults?.some((r) => r.conflict) ?? false;
 
-  // 过滤（事件来自 md-bridge 已经是 MdEvent，但 format 略有差异）
+  // 加载重复规则选项
+  useEffect(() => {
+    fetchRecurrenceOptions()
+      .then((opts) => setRecurrenceOptions(opts.length ? opts : [{ value: '', label: '不重复' }]))
+      .catch(() => setRecurrenceOptions([{ value: '', label: '不重复' }]));
+  }, []);
+
+  // 过滤（事件来自统一数据源，字段是 start/end）
   const filteredEvents = useMemo(() => {
     return events.filter((event) => {
       if (eventFilter.searchText) {
@@ -225,21 +233,18 @@ export default function Calendar({ calendarUrl, externalEvents, refreshKey }: Ca
         ) return false;
       }
       if (eventFilter.categoryId) {
-        if (event.category !== eventFilter.categoryId) return false;
+        if (event.project !== eventFilter.categoryId) return false;
       }
       return true;
     });
   }, [events, eventFilter]);
 
-  // 合并看板（工作搭子）外部事件到日历
-  // 关键：必须走 toFullCalendarEvent 映射，否则 FullCalendar 认不出 date 字段，
-  // 表现为「日历上一个事件都没有」。
+  // 映射成 FullCalendar 事件对象。
+  // 注意：任务与事件在同一个条目池里，所以这里**不需要**再叠加看板任务 ——
+  // 有 start 的任务本来就出现在日历上了。
   const displayEvents = useMemo(
-    () => [
-      ...filteredEvents.map(toFullCalendarEvent),
-      ...(externalEvents || []),
-    ],
-    [filteredEvents, externalEvents],
+    () => filteredEvents.map(toFullCalendarEvent),
+    [filteredEvents],
   );
 
   const handleSelect = (info: any) => {
@@ -251,32 +256,26 @@ export default function Calendar({ calendarUrl, externalEvents, refreshKey }: Ca
       allDay: !!info.allDay,
       description: '',
       tags: [],
-      addToKanban: false,
-      kanbanPriority: '中',
     });
     setShowModal(true);
   };
 
   const handleEventClick = (info: any) => {
-    // 看板叠加层事件只读：点它跳到任务看板，而不是打开（会找不到对应事件）
-    if (info.event.extendedProps?.kanban) {
-      window.location.hash = '#/tasks';
-      return;
-    }
-    const uid = info.event.id;
-    const e = events.find((ev) => ev.uid === uid);
+    const id = info.event.id;
+    // 展开重复规则后，实例 id 形如 "abc@2026-10-05"；原始 id 在 instanceId 里
+    const originalId = info.event.extendedProps?.item?.instanceId || id.split('@')[0];
+    const e = events.find((ev) => (ev.instanceId || ev.id) === originalId);
     if (e) {
       setFormData({
-        uid: e.uid,
+        uid: originalId,
         title: e.title || '',
-        start: new Date(e.date),
-        end: e.end ? new Date(e.end) : new Date(e.date),
+        start: e.start ? new Date(e.start) : new Date(),
+        end: e.end ? new Date(e.end) : e.start ? new Date(e.start) : new Date(),
         allDay: !!e.allDay,
         description: e.description || '',
-        category: e.category,
+        category: e.project,
         tags: e.tags || [],
         recurrence: e.recurrence,
-        kanbanTaskId: e.kanbanTaskId,
       });
       setShowModal(true);
     }
@@ -286,34 +285,33 @@ export default function Calendar({ calendarUrl, externalEvents, refreshKey }: Ca
     if (!formData.title.trim()) return;
     try {
       setShowModal(false);
-      const eventPayload: any = {
+      // 本地时间字符串（不带 Z）—— 统一数据源用本地时间，避免时区偏移
+      const toLocalIso = (d: Date) => {
+        const p = (n: number) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
+          d.getHours(),
+        )}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+      };
+      const itemPayload: any = {
         title: formData.title,
-        date: formData.start.toISOString(),
-        end: formData.end.toISOString(),
+        start: toLocalIso(formData.start),
+        end: toLocalIso(formData.end),
         allDay: formData.allDay,
         description: formData.description,
-        // events.md 里 category 是字符串；这里兼容 CategorySelector 给的 {name,color}
-        category: formData.category?.name || formData.category,
+        // CategorySelector 给的是 {name,color}，这里取名字
+        project: formData.category?.name || formData.category || undefined,
         tags: (formData.tags || []).map((t: any) =>
           typeof t === 'object' ? t.name : t,
         ),
-        recurrence: formData.recurrence,
+        recurrence: formData.recurrence || undefined,
+        kind: formData.kind || 'event',
       };
-      // 新建：可选同时加入任务看板（双向绑定）
-      const kanban: any = !formData.uid && formData.addToKanban
-        ? {
-            priority: formData.kanbanPriority || '中',
-            project: formData.category?.name || formData.category || undefined,
-            due: formData.start.toISOString().slice(0, 10),
-          }
-        : undefined;
       if (formData.uid) {
-        // 编辑已有事件：用 PUT 保留 kanbanTaskId 不被覆盖
-        await updateEvent(formData.uid, eventPayload);
-        console.log('[Calendar] 事件已更新到 events.md（保留 kanbanTaskId）');
+        await updateEvent(formData.uid, itemPayload);
+        console.log('[Calendar] 条目已更新到统一数据源');
       } else {
-        await createEvent(eventPayload, kanban);
-        console.log('[Calendar] 事件已保存到 events.md');
+        await createEvent(itemPayload);
+        console.log('[Calendar] 条目已保存到统一数据源');
       }
     } catch (err) {
       console.error('[Calendar] 保存失败:', err);
@@ -324,25 +322,21 @@ export default function Calendar({ calendarUrl, externalEvents, refreshKey }: Ca
 
   const handleDeleteClick = () => {
     if (formData.uid) {
-      // 取代旧的 eventToDelete；保留 kanbanTaskId 用于级联提示
       setPendingDelete({
         uid: formData.uid,
         title: formData.title,
-        kanbanTaskId: formData.kanbanTaskId,
       });
       setShowDeleteConfirm(true);
     }
   };
 
-  /** 在删除事件时附带处理看板任务联动 */
+  /** 删除条目 —— 删一条就是删一条，没有级联 */
   const confirmDeleteCascade = async () => {
     if (!pendingDelete) return;
     try {
       setShowModal(false);
       setShowDeleteConfirm(false);
-      const uid = pendingDelete.uid;
-      const cascade = deleteLinkedTask && !!pendingDelete.kanbanTaskId;
-      await deleteEvent(uid, cascade);
+      await deleteEvent(pendingDelete.uid);
       setPendingDelete(null);
     } catch (err) {
       alert(
@@ -869,31 +863,6 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
         size="md"
       >
         <div className="space-y-4">
-          {/* 已绑看板任务提示 */}
-          {formData.kanbanTaskId && (
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 text-sm">
-              <ListTodo className="w-4 h-4 text-sky-500 mt-0.5 shrink-0" />
-              <div className="flex-1">
-                <span className="font-medium text-sky-700 dark:text-sky-300">
-                  已在任务看板
-                </span>
-                <span className="block text-xs text-sky-600 dark:text-sky-400 mt-0.5">
-                  任务 ID: {formData.kanbanTaskId}。删除此事件时可选联动删除任务。
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  // hash 路由，直接改 hash 即可；不要碰 location.href（会整页重载）
-                  setShowModal(false);
-                  window.location.hash = '#/tasks';
-                }}
-                className="text-xs text-sky-600 dark:text-sky-300 hover:underline shrink-0"
-              >
-                查看任务
-              </button>
-            </div>
-          )}
-
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               事件标题 *
@@ -991,49 +960,50 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
             />
           </div>
 
-          {/* 双向绑定：同时加入任务看板（仅新建事件时） */}
-          {!formData.uid && (
-            <div className="border-t border-gray-100 dark:border-neutral-800 pt-3">
-              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={!!formData.addToKanban}
-                  onChange={(e) =>
-                    setFormData({ ...formData, addToKanban: e.target.checked })
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
-                />
-                <ListTodo className="w-4 h-4 text-brand" />
-                同时加入任务看板（与日历事件双向绑定）
-              </label>
-              {formData.addToKanban && (
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">
-                      任务优先级
-                    </label>
-                    <select
-                      value={formData.kanbanPriority || '中'}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          kanbanPriority: e.target.value as '高' | '中' | '低',
-                        })
-                      }
-                      className={`w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} bg-white dark:bg-neutral-800 text-gray-900 dark:text-white`}
-                    >
-                      <option value="高">高</option>
-                      <option value="中">中</option>
-                      <option value="低">低</option>
-                    </select>
-                  </div>
-                  <div className="flex items-end text-xs text-gray-500 dark:text-gray-400">
-                    截止日期自动取自事件开始日期
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {/* 重复规则 */}
+          <div className="border-t border-gray-100 dark:border-neutral-800 pt-3">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              重复
+            </label>
+            <select
+              value={formData.recurrence || ''}
+              onChange={(e) =>
+                setFormData({ ...formData, recurrence: e.target.value || undefined })
+              }
+              className={`w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} bg-white dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand`}
+            >
+              {recurrenceOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {formData.recurrence && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                该条目会在日历上按此规则重复出现
+              </p>
+            )}
+          </div>
+
+          {/* 类型：任务同时出现在看板与日历 */}
+          <div className="border-t border-gray-100 dark:border-neutral-800 pt-3">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              类型
+            </label>
+            <select
+              value={formData.kind || 'event'}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  kind: e.target.value === 'task' ? 'task' : 'event',
+                })
+              }
+              className={`w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} bg-white dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand`}
+            >
+              <option value="event">事件（只出现在日历）</option>
+              <option value="task">任务（同时出现在看板与日历）</option>
+            </select>
+          </div>
 
           <CategorySelector
             categories={categories}
@@ -1094,27 +1064,8 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
         size="sm"
       >
         <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-          确定删除事件「{pendingDelete?.title}」吗？此操作会同时从 events.md 中移除。
+          确定删除「{pendingDelete?.title}」吗？此操作会从统一数据源中移除该条目。
         </p>
-        {pendingDelete?.kanbanTaskId && (
-          <label className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm mb-4">
-            <input
-              type="checkbox"
-              checked={deleteLinkedTask}
-              onChange={(e) => setDeleteLinkedTask(e.target.checked)}
-              className="h-4 w-4 mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
-            />
-            <span>
-              <span className="font-medium text-amber-700 dark:text-amber-300">
-                同时删除任务看板中的对应任务
-              </span>
-              <span className="block text-xs text-amber-600 dark:text-amber-400 mt-1">
-                事件已与工作搭子任务绑定（task id: {pendingDelete.kanbanTaskId}）。
-                取消勾选则仅解除绑定、保留看板任务。
-              </span>
-            </span>
-          </label>
-        )}
         <div className="flex justify-end gap-2">
           <button
             onClick={() => setShowDeleteConfirm(false)}

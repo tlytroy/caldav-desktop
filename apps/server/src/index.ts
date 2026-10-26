@@ -9,6 +9,7 @@ import { webdavRouter } from "./routes/webdav.js";
 import { nlpRouter } from "./routes/nlp.js";
 import { configRouter } from "./routes/config.js";
 import { pluginRouter } from "./routes/plugins.js";
+import { workspaceRouter } from "./routes/workspace.js";
 import { loadBridgeConfig } from "./md-ics-bridge.js";
 
 const app = express();
@@ -42,6 +43,9 @@ app.use("/api/config", configRouter);
 
 // 插件 routes（扫描 plugins/ 目录，返回模块清单）
 app.use("/api/plugins", pluginRouter);
+
+// 统一数据源 routes（workspace.md —— 事件与任务的唯一事实源）
+app.use("/api/workspace", workspaceRouter);
 
 async function start() {
   // CalDAV 连接失败**不应阻止服务启动**。
