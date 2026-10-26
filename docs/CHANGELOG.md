@@ -19,6 +19,25 @@ All notable changes to CalDAV Desktop are documented here.
 - **ESM 下 `__dirname` 不存在**：新增的 config/plugins 模块用 `__dirname` 取路径，
   服务启动即 500。
 
+### 🐛 CalDAV 不可用时优雅降级（不再 500）
+
+用户反馈「radicale 关了，其他功能正常吗」→ 全功能验收时发现：
+`/api/calendar/calendars` 在服务器连不上时返回 **500 + "cannot find principalUrl"**，
+导致用户打开日历页直接看到报错。
+
+现在**读接口**（`GET /calendars`、`GET /events`）在连接类错误时返回
+200 + `degraded: true` + 空数组 + 可读提示，界面显示黄色横幅
+「CalDAV 同步暂不可用 —— 本地 events.md 与任务看板照常可用」。
+
+**写接口保持 500**（POST/PUT/DELETE 事件）—— 让用户以为写成功了更危险。
+有静态测试锁定「只有两处降级，且都是 GET」。
+
+### ✨ 全功能验收脚本
+
+新增 `apps/server/src/__tests__/acceptance.e2e.mjs`（73 项），
+真实 HTTP 打全部 API，覆盖从「输入一句话」到「数据落盘」的完整链路。
+需先启动真实服务：`node dist/index.js && node src/__tests__/acceptance.e2e.mjs`
+
 ### ✨ 配置可在界面里改（CalDAV / WebDAV / AI / 数据路径全接入）
 
 - 新增 `config.json` 配置层：优先级 config.json > 环境变量 > .env > 默认值

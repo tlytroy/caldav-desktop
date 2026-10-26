@@ -34,9 +34,42 @@ api.interceptors.response.use(
 );
 
 // 获取日历列表
+/**
+ * 获取日历列表。
+ *
+ * CalDAV 服务器不可用时，后端会返回**降级响应**（200 + 空数组 + degraded 标记）
+ * 而不是 500 —— 本地 md 数据照常可用，不该因为服务器挂了整个页面报错。
+ */
 export async function fetchCalendars(): Promise<Calendar[]> {
   const response = await api.get("/api/calendar/calendars");
-  return response.data;
+  const data = response.data;
+  if (data && typeof data === "object" && data.degraded) {
+    // 记下降级状态，界面据此提示用户
+    markSyncDegraded(data.error || "CalDAV 不可用");
+    return [];
+  }
+  markSyncAvailable();
+  return Array.isArray(data) ? data : [];
+}
+
+/** CalDAV 降级状态（全局，供界面读取） */
+let syncDegradedReason: string | null = null;
+const syncDegradedListeners = new Set<(reason: string | null) => void>();
+
+export function markSyncDegraded(reason: string) {
+  syncDegradedReason = reason;
+  syncDegradedListeners.forEach((fn) => fn(reason));
+}
+export function markSyncAvailable() {
+  syncDegradedReason = null;
+  syncDegradedListeners.forEach((fn) => fn(null));
+}
+export function getSyncDegradedReason(): string | null {
+  return syncDegradedReason;
+}
+export function subscribeSyncDegraded(fn: (reason: string | null) => void) {
+  syncDegradedListeners.add(fn);
+  return () => syncDegradedListeners.delete(fn);
 }
 
 // 获取日历事件

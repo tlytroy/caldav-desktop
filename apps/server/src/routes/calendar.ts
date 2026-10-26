@@ -10,6 +10,38 @@ import {
 } from "../caldav.js";
 export const calendarRouter = express.Router();
 
+/**
+ * 判断错误是不是「CalDAV 服务器连不上」这类外部依赖问题。
+ *
+ * 这类错误不该让整个接口 500 —— 服务器暂时挂了，用户打开应用看到的应该是
+ * 「同步暂不可用，本地数据照常可用」，而不是一坨报错。
+ */
+function isConnectionError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /principalUrl|cannot find|fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network|502|503|504|getaddrinfo/i.test(
+    msg,
+  );
+}
+
+/**
+ * CalDAV 不可用时的统一响应。
+ *
+ * 返回 200 + 空数据 + 状态标记，让前端能正常渲染（显示"同步不可用"提示），
+ * 而不是整个页面报错。本地 md 数据仍然完全可用 —— 这是本工具的设计前提。
+ */
+function degraded(res: express.Response, error: unknown) {
+  const msg = error instanceof Error ? error.message : String(error);
+  res.json({
+    success: true,
+    degraded: true,
+    data: [],
+    calendars: [],
+    events: [],
+    error: msg,
+    message: "CalDAV 服务器当前不可用，本地数据不受影响。可在「设置 → 同步」中检查配置。",
+  });
+}
+
 calendarRouter.get("/calendars", async (_, res) => {
   try {
     // Ensure we're authenticated before fetching calendars
@@ -17,6 +49,10 @@ calendarRouter.get("/calendars", async (_, res) => {
     const cals = await davClient.fetchCalendars();
     res.json(cals);
   } catch (error) {
+    if (isConnectionError(error)) {
+      // 服务器连不上 → 优雅降级，不要 500
+      return degraded(res, error);
+    }
     res.status(500).json({ error: (error as Error).message });
   }
 });
@@ -388,6 +424,10 @@ calendarRouter.get("/events", async (req, res) => {
 
     res.json(events);
   } catch (error) {
+    if (isConnectionError(error)) {
+      // 服务器连不上 → 返回空事件列表 + 提示，不让整个日历页崩掉
+      return degraded(res, error);
+    }
     res.status(500).json({ error: (error as Error).message });
   }
 });

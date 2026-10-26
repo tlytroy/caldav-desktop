@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { AlertTriangle } from "lucide-react";
 import Calendar from "../../components/Calendar";
 import QuickCreate from "../../components/QuickCreate";
 import { fetchKanban, type KanbanTodo } from "../../api/kanban";
 import { addMdEvent } from "../../api/md-bridge";
 import type { MdEvent } from "../../api/md-bridge";
+import {
+  subscribeSyncDegraded,
+  getSyncDegradedReason,
+} from "../../api/calendar";
 
 const PRIORITY_COLOR: Record<KanbanTodo["priority"], string> = {
   高: "#ef4444",
@@ -26,6 +31,17 @@ export default function CalendarPage() {
   const [todos, setTodos] = useState<KanbanTodo[]>([]);
   // 每次快速创建后自增，触发 Calendar 重读 events.md
   const [refreshKey, setRefreshKey] = useState(0);
+  // CalDAV 不可用时的降级提示（本地 md 数据照常可用）
+  const [syncDegraded, setSyncDegraded] = useState<string | null>(
+    getSyncDegradedReason(),
+  );
+
+  useEffect(() => {
+    const unsub = subscribeSyncDegraded(setSyncDegraded);
+    return () => {
+      unsub();
+    };
+  }, []);
 
   const loadTodos = useCallback(() => {
     fetchKanban()
@@ -99,6 +115,20 @@ export default function CalendarPage() {
       </div>
 
       <QuickCreate onCreate={handleQuickCreate} />
+
+      {/* CalDAV 不可用提示 —— 本地数据不受影响 */}
+      {syncDegraded && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+          <div className="text-amber-700 dark:text-amber-300">
+            <span className="font-medium">CalDAV 同步暂不可用</span>
+            <span className="block text-xs mt-0.5">
+              {syncDegraded} —— 本地 events.md 与任务看板照常可用，
+              事件会正常显示和保存；只是不会与日历服务器互相同步。
+            </span>
+          </div>
+        </div>
+      )}
 
       <Calendar externalEvents={externalEvents} refreshKey={refreshKey} />
     </div>
