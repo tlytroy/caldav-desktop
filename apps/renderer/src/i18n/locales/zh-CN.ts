@@ -49,6 +49,7 @@ export const zhCN = {
       ai: "AI 解析",
       sync: "同步",
       general: "通用",
+      data: "数据文件",
       about: "关于",
     },
     appearance: {
@@ -118,6 +119,16 @@ export const zhCN = {
         "关闭时优先用本地规则（更快、离线可用），只在规则失败时才调用 AI",
       parserLocale: "解析语言",
       configFile: "配置文件位置",
+    },
+    data: {
+      title: "数据文件",
+      description:
+        "所有事件与任务都存在这两个 Markdown 文件里 —— 它们是唯一事实源，可直接用记事本查看和编辑。",
+      eventsFile: "事件文件",
+      kanbanFile: "任务看板文件",
+      pathHint: "相对路径基于服务进程的启动目录",
+      restartHint:
+        "修改文件路径后需要重启服务才会生效（涉及已打开的文件句柄）。若环境变量里也设置了同名变量，环境变量优先。",
     },
     about: {
       title: "关于",

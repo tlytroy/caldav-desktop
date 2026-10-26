@@ -50,6 +50,7 @@ export const enUS = {
       ai: "AI Parsing",
       sync: "Sync",
       general: "General",
+      data: "Data files",
       about: "About",
     },
     appearance: {
@@ -121,6 +122,16 @@ export const enUS = {
         "When off, local rules are tried first (faster, works offline); AI is only called when rules fail",
       parserLocale: "Parsing language",
       configFile: "Config file location",
+    },
+    data: {
+      title: "Data files",
+      description:
+        "Every event and task lives in these two Markdown files — they're the single source of truth, open and edit them with any text editor.",
+      eventsFile: "Events file",
+      kanbanFile: "Task board file",
+      pathHint: "Relative paths are resolved against the server's working directory",
+      restartHint:
+        "Changing a file path takes effect after restarting the server (open file handles). If the same variable is also set in the environment, the environment wins.",
     },
     about: {
       title: "About",

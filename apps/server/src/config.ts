@@ -84,6 +84,19 @@ export interface AppConfig {
     /** 解析语言，用于选择解析器 */
     parserLocale: string;
   };
+
+  /**
+   * 数据文件路径。
+   *
+   * 这些是「部署级」配置：可以放 config.json，但**环境变量优先**，
+   * 因为容器部署时通常用环境变量指定挂载位置。
+   */
+  paths: {
+    /** 事件文件（相对路径基于进程 cwd） */
+    eventsFile: string;
+    /** 工作搭子看板文件 */
+    kanbanFile: string;
+  };
 }
 
 /** 默认配置 */
@@ -120,6 +133,10 @@ export const DEFAULT_CONFIG: AppConfig = {
   nlp: {
     preferAI: false,
     parserLocale: "zh-CN",
+  },
+  paths: {
+    eventsFile: "./events.md",
+    kanbanFile: "./工作搭子看板.md",
   },
 };
 
@@ -373,6 +390,39 @@ export function getSecret(field: SecretField): string {
     cur = cur[p];
   }
   return typeof cur === "string" ? cur : "";
+}
+
+/**
+ * 解析数据文件路径。
+ *
+ * 优先级：**环境变量 > config.json > 默认值**。
+ * 与其他配置相反 —— 路径是「部署级」配置，容器部署时通常用环境变量
+ * 指定挂载位置，环境变量应当优先。
+ *
+ * 相对路径基于**进程 cwd** 解析（与 .env 里的写法一致）。
+ */
+export function resolveDataPath(
+  kind: "events" | "kanban",
+): string {
+  const envKey = kind === "events" ? "MD_EVENTS_FILE" : "KANBAN_FILE_PATH";
+  const envVal = process.env[envKey];
+  if (envVal && envVal.trim()) {
+    const p = envVal.trim();
+    return path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
+  }
+
+  const cfg = getConfig();
+  const raw =
+    (kind === "events" ? cfg.paths?.eventsFile : cfg.paths?.kanbanFile) || "";
+  if (raw.trim()) {
+    const p = raw.trim();
+    return path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
+  }
+
+  return path.resolve(
+    process.cwd(),
+    kind === "events" ? "events.md" : "工作搭子看板.md",
+  );
 }
 
 /** 配置是否存在于磁盘 */

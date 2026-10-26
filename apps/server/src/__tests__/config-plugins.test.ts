@@ -188,7 +188,7 @@ describe("配置 API", () => {
     server.close();
   });
 
-  it("PUT 不允许写 paths 段", async () => {
+  it("PUT 不允许写未声明的顶层段", async () => {
     const app = apiFor(configRouter, "/api/config");
     const server = app.listen(0);
     await new Promise((r) => server.once("listening", r));
@@ -197,13 +197,102 @@ describe("配置 API", () => {
     await fetch(`${base}/api/config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paths: { evil: "/etc" } }),
+      body: JSON.stringify({ evilSection: { hack: "/etc" } }),
     });
-    // paths 不在 WRITABLE_SECTIONS 里，应该被拒
+    // 未在 WRITABLE_SECTIONS 里，应该被忽略
     const j = await (await fetch(`${base}/api/config`)).json();
-    expect(j.config.paths).toBeUndefined();
+    expect(j.config.evilSection).toBeUndefined();
 
     server.close();
+  });
+
+  it("PUT 允许写 paths 段（数据文件路径可在界面改）", async () => {
+    const app = apiFor(configRouter, "/api/config");
+    const server = app.listen(0);
+    await new Promise((r) => server.once("listening", r));
+    const base = `http://127.0.0.1:${(server.address() as any).port}`;
+
+    await fetch(`${base}/api/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: { eventsFile: "./custom-events.md" } }),
+    });
+    const j = await (await fetch(`${base}/api/config`)).json();
+    expect(j.config.paths.eventsFile).toBe("./custom-events.md");
+
+    server.close();
+  });
+});
+
+describe("配置层与各模块的联动（防止「界面改了不生效」）", () => {
+  it("WebDAV 读配置层的 url 而不是写死的值", async () => {
+    // 回归点：曾经把 remoteDir 写死成常量，用户在界面改目录完全不生效
+    cfg.saveConfig({
+      webdav: { url: "https://dav.example.com/x", remoteDir: "MyCal" },
+    } as any);
+    const { loadWebDAVConfig } = await import("../webdav.js");
+    const wc = loadWebDAVConfig();
+    expect(wc.url).toBe("https://dav.example.com/x");
+    expect(wc.remoteDir).toContain("MyCal");
+  });
+
+  it("WebDAV 的 remoteDir 跟随配置层变化", async () => {
+    cfg.saveConfig({ webdav: { remoteDir: "DirA" } } as any);
+    const { loadWebDAVConfig } = await import("../webdav.js");
+    expect(loadWebDAVConfig().remoteDir).toContain("DirA");
+
+    cfg.saveConfig({ webdav: { remoteDir: "DirB" } } as any);
+    cfg.invalidateConfigCache();
+    expect(loadWebDAVConfig().remoteDir).toContain("DirB");
+  });
+
+  it("AI 读配置层的 model", async () => {
+    cfg.saveConfig({
+      ai: { enabled: true, baseUrl: "https://x/v1", apiKey: "sk-1", model: "my-model" },
+    } as any);
+    const { loadAIConfig } = await import("../nlp/ai-parser.js");
+    const ac = loadAIConfig();
+    expect(ac.model).toBe("my-model");
+    expect(ac.baseUrl).toBe("https://x/v1");
+    expect(ac.enabled).toBe(true);
+  });
+
+  it("CalDAV 读配置层的 rootUrl（不再被 env 硬编码覆盖）", async () => {
+    // 回归点：曾硬编码 process.env.CALDAV_ROOT_URL 优先，界面改的地址不生效
+    const savedRoot = process.env.CALDAV_ROOT_URL;
+    process.env.CALDAV_ROOT_URL = "https://env-root.example.com";
+    try {
+      cfg.saveConfig({ caldav: { rootUrl: "https://config-root.example.com" } } as any);
+      cfg.invalidateConfigCache();
+      const caldav = await import("../caldav.js");
+      // config.json 优先于 env
+      expect(caldav.getCalDAVRootUrl()).toBe("https://config-root.example.com");
+    } finally {
+      if (savedRoot === undefined) delete process.env.CALDAV_ROOT_URL;
+      else process.env.CALDAV_ROOT_URL = savedRoot;
+    }
+  });
+
+  it("数据路径：环境变量优先于 config.json", () => {
+    const savedEnv = process.env.MD_EVENTS_FILE;
+    try {
+      cfg.saveConfig({ paths: { eventsFile: "./from-config.md" } } as any);
+      // 无环境变量时用 config.json
+      delete process.env.MD_EVENTS_FILE;
+      expect(cfg.resolveDataPath("events")).toContain("from-config.md");
+
+      // 有环境变量时环境变量优先
+      process.env.MD_EVENTS_FILE = "./from-env.md";
+      expect(cfg.resolveDataPath("events")).toContain("from-env.md");
+    } finally {
+      if (savedEnv === undefined) delete process.env.MD_EVENTS_FILE;
+      else process.env.MD_EVENTS_FILE = savedEnv;
+    }
+  });
+
+  it("数据路径是绝对路径", () => {
+    expect(path.isAbsolute(cfg.resolveDataPath("events"))).toBe(true);
+    expect(path.isAbsolute(cfg.resolveDataPath("kanban"))).toBe(true);
   });
 });
 

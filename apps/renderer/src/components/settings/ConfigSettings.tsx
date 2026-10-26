@@ -19,6 +19,7 @@ import {
   Languages,
   Brain,
   RefreshCw,
+  FolderCog,
   Info,
 } from "lucide-react";
 import { useI18n, AVAILABLE_LOCALES, type Locale } from "../../i18n";
@@ -59,9 +60,13 @@ interface AppConfig {
     preferAI: boolean;
     parserLocale: string;
   };
+  paths: {
+    eventsFile: string;
+    kanbanFile: string;
+  };
 }
 
-type Tab = "general" | "ai" | "sync";
+type Tab = "general" | "ai" | "sync" | "data";
 
 export default function ConfigSettings() {
   const { t, locale, setLocale } = useI18n();
@@ -96,7 +101,11 @@ export default function ConfigSettings() {
   }, [load]);
 
   /** 更新某段配置的某个字段 */
-  const patch = (section: "ai" | "caldav" | "webdav" | "nlp", key: string, value: any) => {
+  const patch = (
+    section: "ai" | "caldav" | "webdav" | "nlp" | "paths",
+    key: string,
+    value: any,
+  ) => {
     setCfg((prev) =>
       prev
         ? ({
@@ -118,6 +127,7 @@ export default function ConfigSettings() {
         caldav: cfg.caldav,
         webdav: cfg.webdav,
         nlp: cfg.nlp,
+        paths: cfg.paths,
         language: cfg.language,
       });
       setCfg(data.config);
@@ -200,6 +210,7 @@ export default function ConfigSettings() {
     { id: "general", label: t("settings.tabs.general"), icon: Languages },
     { id: "ai", label: t("settings.tabs.ai"), icon: Brain },
     { id: "sync", label: t("settings.tabs.sync"), icon: RefreshCw },
+    { id: "data", label: t("settings.tabs.data"), icon: FolderCog },
   ];
 
   return (
@@ -523,6 +534,44 @@ export default function ConfigSettings() {
               {t("settings.sync.testWebdav")}
             </button>
           </section>
+        </div>
+      )}
+
+      {/* ============ 数据文件 ============ */}
+      {tab === "data" && (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+            {t("settings.data.description")}
+          </p>
+
+          <Field label={t("settings.data.eventsFile")} hint={t("settings.data.pathHint")}>
+            <input
+              value={cfg.paths?.eventsFile || ""}
+              onChange={(e) => patch("paths", "eventsFile", e.target.value)}
+              placeholder="./events.md"
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white text-sm font-mono"
+            />
+          </Field>
+
+          <Field label={t("settings.data.kanbanFile")} hint={t("settings.data.pathHint")}>
+            <input
+              value={cfg.paths?.kanbanFile || ""}
+              onChange={(e) => patch("paths", "kanbanFile", e.target.value)}
+              placeholder="./工作搭子看板.md"
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white text-sm font-mono"
+            />
+          </Field>
+
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300">
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <span>{t("settings.data.restartHint")}</span>
+          </div>
+
+          <Field label={t("settings.general.configFile")}>
+            <code className="block px-3 py-2 rounded-lg bg-gray-100 dark:bg-neutral-800 text-xs text-gray-600 dark:text-gray-300 break-all">
+              {configPath}
+            </code>
+          </Field>
         </div>
       )}
 

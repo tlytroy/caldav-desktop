@@ -430,8 +430,14 @@ This project was developed with the help of AI coding assistants, demonstrating 
 config.json（界面写入） > 环境变量 > 项目 .env > 代码默认值
 ```
 
+**配置保存在项目根目录的 `config.json`**，重启后自动加载 —— 不用每次重配。
+`config.json` 已加入 `.gitignore`（含密钥，不入库），可随时备份或用 git 管理。
+
 敏感字段（API Key / 密码）读取时返回掩码（`sk-****abcd`），
 界面原样回传掩码时视为「未修改」，**不会覆盖真实值**。
+
+> 例外：**数据文件路径**（events.md / 看板）以**环境变量优先** ——
+> 容器部署时通常用环境变量指定挂载位置。
 
 ### 多语言
 

@@ -32,6 +32,7 @@ const WRITABLE_SECTIONS = [
   "caldav",
   "webdav",
   "nlp",
+  "paths",
 ] as const;
 
 /**
@@ -73,9 +74,6 @@ configRouter.put("/", (req, res) => {
         error: `没有可写入的配置项。可写字段：${WRITABLE_SECTIONS.join(", ")}`,
       });
     }
-
-    // 路径类配置不允许从界面改（避免写到意外位置）
-    delete (patch as any).paths;
 
     const saved = saveConfig(patch);
     res.json({

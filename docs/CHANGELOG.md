@@ -19,10 +19,13 @@ All notable changes to CalDAV Desktop are documented here.
 - **ESM 下 `__dirname` 不存在**：新增的 config/plugins 模块用 `__dirname` 取路径，
   服务启动即 500。
 
-### ✨ 配置可在界面里改
+### ✨ 配置可在界面里改（CalDAV / WebDAV / AI / 数据路径全接入）
 
 - 新增 `config.json` 配置层：优先级 config.json > 环境变量 > .env > 默认值
-- 设置界面新增三个标签页：通用（语言/AI 偏好）、AI 解析、同步（CalDAV + WebDAV）
+  - **CalDAV 也接入**（此前仍读 env，界面改地址不生效）
+  - **数据文件路径接入**（events.md / 看板路径可在界面改）
+  - 改完**立即生效**，无需重启
+- 设置界面新增四个标签页：通用、AI 解析、同步（CalDAV + WebDAV）、数据文件
 - 敏感字段脱敏传输（`sk-****abcd`），界面回传掩码时**不覆盖真实值**
 - config.json 已加入 .gitignore
 

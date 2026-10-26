@@ -28,6 +28,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { resolveDataPath } from "./config.js";
 
 // ===== Types =====
 
@@ -72,7 +73,7 @@ export interface BridgeConfig {
 export function loadBridgeConfig(): BridgeConfig {
   return {
     enabled: process.env.MD_ICS_ENABLED === "true",
-    eventsFilePath: process.env.MD_EVENTS_FILE || "./events.md",
+    eventsFilePath: resolveDataPath("events"),
     syncDirection:
       (process.env.MD_ICS_SYNC_DIRECTION as BridgeConfig["syncDirection"]) ||
       "bidirectional",

@@ -48,7 +48,17 @@ export function loadWebDAVConfig(): WebDAVConfig {
     url: (cfg.webdav.url || "").trim(),
     username: cfg.webdav.username || "",
     password: cfg.webdav.password || "",
-    remoteDir: `CalDAV-Desktop/events.md`,
+    /**
+     * 远端目录。
+     *
+     * ⚠️ 这里必须读配置层的值 —— 之前写死成常量，导致用户在界面改了目录
+     *    完全不生效（实测发现）。配置层存的是**目录名**（如 MyCal），
+     *    这里补上 .md 后缀只是为了与旧接口的形状保持一致；
+     *    实际取目录部分时由 remoteDirOf() 处理。
+     */
+    remoteDir: cfg.webdav.remoteDir
+      ? `${cfg.webdav.remoteDir.replace(/\/+$/, "")}/events.md`
+      : "CalDAV-Desktop/events.md",
     timeoutMs: cfg.webdav.timeoutMs || 20000,
   };
 }

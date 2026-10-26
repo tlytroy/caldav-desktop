@@ -17,6 +17,7 @@
 import express from "express";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { getConfig, resolveDataPath } from "../config.js";
 import {
   loadWebDAVConfig,
   isWebDAVConfigured,
@@ -31,46 +32,46 @@ import {
 export const webdavRouter = express.Router();
 
 /**
- * 解析本地 md 文件路径。
+ * 当前要参与同步的本地文件清单。
  *
- * 注意：`.env` 里 `MD_EVENTS_FILE=./events.md` 是**相对进程 cwd** 的。
- * 项目里此前有两种写法并存（`path.resolve(cwd)` 与直接用相对串），
- * 虽然结果相同但语义混乱。这里统一成绝对路径。
+ * 路径来源统一走 config.ts 的 resolveDataPath()：
+ *   环境变量 > config.json（界面可改）> 默认值
  */
-function resolveLocalPath(raw: string, fallbackName: string): string {
-  const p = (raw || "").trim();
-  if (!p) return path.resolve(process.cwd(), fallbackName);
-  return path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
-}
-
-/** 当前要参与同步的本地文件清单 */
 function syncTargets(cfg: WebDAVConfig) {
-  const eventsFile = resolveLocalPath(
-    process.env.MD_EVENTS_FILE || "",
-    "events.md",
-  );
-  const kanbanFile = resolveLocalPath(
-    process.env.KANBAN_FILE_PATH || "",
-    "工作搭子看板.md",
-  );
   return [
-    { key: "events", localPath: eventsFile, filename: "events.md" },
-    { key: "kanban", localPath: kanbanFile, filename: "工作搭子看板.md" },
+    {
+      key: "events",
+      localPath: resolveDataPath("events"),
+      filename: "events.md",
+    },
+    {
+      key: "kanban",
+      localPath: resolveDataPath("kanban"),
+      filename: "工作搭子看板.md",
+    },
   ];
 }
 
 /**
  * 远端目录名。
  *
- * 配置层（config.json / .env 的 WEBDAV_EVENTS_PATH）已经把它拆成了
- * 「目录 + 文件名」两部分，config.remoteDir 只保留目录部分。
- * 这里做一次兜底：万一拿到的是完整路径，取其目录部分。
+ * 优先直接用配置层的目录名（用户在界面里填的）。
+ * 兜底：若拿到的是完整路径（如旧的 WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md），
+ * 取其目录部分。
  */
 function remoteDirOf(cfg: WebDAVConfig): string {
+  const configured = getConfig().webdav.remoteDir?.trim();
+  if (configured) {
+    // 配置层存的是纯目录名；若用户填了路径形式，取第一段
+    const cleaned = configured.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (!/\.md$/i.test(cleaned)) return cleaned;
+    const idx = cleaned.lastIndexOf("/");
+    return idx >= 0 ? cleaned.slice(0, idx) : cleaned;
+  }
+
   const p = (cfg.remoteDir || "").replace(/^\/+/, "").replace(/\/+$/, "");
   if (!p) return "CalDAV-Desktop";
   const idx = p.lastIndexOf("/");
-  // 末尾是 .md 文件 → 取目录
   if (/\.md$/i.test(p)) return idx >= 0 ? p.slice(0, idx) : "CalDAV-Desktop";
   return p;
 }

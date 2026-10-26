@@ -1,4 +1,5 @@
 import { DAVClient, DAVAccount, DAVCalendar } from "tsdav";
+import { getConfig } from "./config.js";
 
 interface CalDAVConfig {
   url: string;
@@ -6,32 +7,90 @@ interface CalDAVConfig {
   password: string;
 }
 
+/**
+ * 从统一配置层读取 CalDAV 配置。
+ *
+ * ⚠️ 之前这里直接读 `process.env.CALDAV_ROOT_URL`，导致**界面里改的地址不生效**
+ *    （env 的 rootUrl 永远优先）。现在改为：
+ *      rootUrl = config.json > env CALDAV_ROOT_URL > env CALDAV_URL
+ *    并把 calendar URL 与 root URL 分开存：
+ *      - url      指向具体日历（含 /root/<principal>/<calendar>/）
+ *      - rootUrl  用于 tsdav 的 PROPFIND 发现（不含日历路径）
+ */
+function readCalDAVSettings(): CalDAVConfig & { rootUrl: string } {
+  const cfg = getConfig();
+  const envRoot = process.env.CALDAV_ROOT_URL || "";
+  const envUrl = process.env.CALDAV_URL || "";
+
+  const url = cfg.caldav.rootUrl || envUrl || "http://localhost:5232";
+  const rootUrl = cfg.caldav.rootUrl || envRoot || url;
+
+  return {
+    url,
+    rootUrl,
+    username: cfg.caldav.username || process.env.CALDAV_USER || "",
+    password: cfg.caldav.password || process.env.CALDAV_PASS || "",
+  };
+}
+
+const initial = readCalDAVSettings();
+
 // Store current config
 export let currentConfig: CalDAVConfig = {
-  url: process.env.CALDAV_URL || "http://localhost:5232",
-  username: process.env.CALDAV_USER || "",
-  password: process.env.CALDAV_PASS || "",
+  url: initial.url,
+  username: initial.username,
+  password: initial.password,
 };
 
-// Separate root URL for tsdav PROPFIND discovery (different from calendar-specific CALDAV_URL)
-export let caldavRootUrl: string =
-  process.env.CALDAV_ROOT_URL ||
-  process.env.CALDAV_URL ||
-  "http://localhost:5232";
+/**
+ * Separate root URL for tsdav PROPFIND discovery.
+ *
+ * ⚠️ 用函数而非常量 —— 界面改了 CalDAV 配置后要立即生效，
+ *    常量版本会导致「改了不生效」（实测踩过）。
+ *    内部用 `_caldavRootUrl` 缓存手动设置过的值（setServerConfig）。
+ */
+let _caldavRootUrl: string = initial.rootUrl;
+
+/**
+ * 读取当前的 root URL。
+ *
+ * 优先级：config.json（界面写入）> setServerConfig 手动值 > env > 默认。
+ * 这样界面改完立即生效，而 setServerConfig 仍能作为程序化设置的入口。
+ */
+export function getCalDAVRootUrl(): string {
+  const settings = readCalDAVSettings();
+  // 配置层有值就用它（界面改的优先）
+  if (settings.rootUrl) return settings.rootUrl;
+  if (_caldavRootUrl) return _caldavRootUrl;
+  return initial.rootUrl;
+}
 
 // Lazy-initialized DAVClient - created on first use
 let _davClient: DAVClient | null = null;
+/** 客户端创建时用的配置快照 —— 用于检测配置变化并重建 */
+let _clientSignature = "";
+
+/** 当前配置的指纹（变了就要重建客户端） */
+function configSignature(): string {
+  const s = readCalDAVSettings();
+  return `${s.rootUrl}|${s.username}|${s.password}`;
+}
 
 function getDavClient(): DAVClient {
-  if (!_davClient) {
+  const sig = configSignature();
+  if (!_davClient || sig !== _clientSignature) {
+    const s = readCalDAVSettings();
     _davClient = new DAVClient({
-      serverUrl: caldavRootUrl,
+      serverUrl: s.rootUrl,
       credentials: {
-        username: currentConfig.username,
-        password: currentConfig.password,
+        username: s.username,
+        password: s.password,
       },
       authMethod: "Basic",
     } as any);
+    _clientSignature = sig;
+    // 地址或凭据变了，之前的登录态失效
+    currentAccount = null;
   }
   return _davClient;
 }
@@ -51,16 +110,22 @@ export let currentAccount: DAVAccount | null = null;
 // Update the client configuration
 export function setServerConfig(config: CalDAVConfig) {
   currentConfig = config;
-  caldavRootUrl = process.env.CALDAV_ROOT_URL || config.url;
+  // root URL 优先用配置层；界面填的 url 若含 /root/<principal>/ 则回退到它的上级
+  const settings = readCalDAVSettings();
+  _caldavRootUrl =
+    settings.rootUrl ||
+    config.url.replace(/\/root\/.*$/, "") ||
+    config.url;
   // Recreate client with new config
   _davClient = new DAVClient({
-    serverUrl: caldavRootUrl,
+    serverUrl: _caldavRootUrl,
     credentials: {
       username: config.username,
       password: config.password,
     },
     authMethod: "Basic",
   } as any);
+  _clientSignature = configSignature();
   // Reset account to force re-authentication
   currentAccount = null;
 }
@@ -71,8 +136,9 @@ export async function testConnection(config: CalDAVConfig): Promise<{
   message: string;
   calendars?: DAVCalendar[];
 }> {
+  const settings = readCalDAVSettings();
   const testRootUrl =
-    process.env.CALDAV_ROOT_URL ||
+    settings.rootUrl ||
     config.url.replace(/\/root\/.*$/, "") ||
     config.url;
 
@@ -112,7 +178,7 @@ export async function initializeClient() {
     // Then create an account
     currentAccount = await davClient.createAccount({
       account: {
-        serverUrl: caldavRootUrl,
+        serverUrl: getCalDAVRootUrl(),
         credentials: {
           username: currentConfig.username,
           password: currentConfig.password,
@@ -153,7 +219,7 @@ export async function ensureAuthenticated(): Promise<DAVAccount> {
     // Create account after login
     currentAccount = await davClient.createAccount({
       account: {
-        serverUrl: caldavRootUrl,
+        serverUrl: getCalDAVRootUrl(),
         credentials: {
           username: currentConfig.username,
           password: currentConfig.password,

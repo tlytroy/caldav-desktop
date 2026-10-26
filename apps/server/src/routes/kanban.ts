@@ -20,13 +20,19 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { ensureEventsFile, writeEventsFile } from "../md-ics-bridge.js";
+import { resolveDataPath } from "../config.js";
 
 export const kanbanRouter = express.Router();
 
-// 看板文件路径：优先环境变量，否则默认服务进程目录下 `工作搭子看板.md`
-const KANBAN_FILE =
-  process.env.KANBAN_FILE_PATH ||
-  path.resolve(process.cwd(), "工作搭子看板.md");
+/**
+ * 看板文件路径。
+ * 来源优先级：环境变量 > config.json（界面可改）> 默认值。
+ * 见 config.ts 的 resolveDataPath()。
+ *
+ * ⚠️ 这里在模块加载时求值一次。若用户在界面改了路径，需要重启服务
+ *    （文件路径变更涉及已打开的文件句柄，冷启动更安全）。
+ */
+const KANBAN_FILE = resolveDataPath("kanban");
 
 // ===== 类型 =====
 export interface KanbanTodo {
@@ -368,7 +374,7 @@ function touchUpdated(lines: string[]): string {
 function removeLinkedEvent(uid: string): void {
   try {
     const eventsFile = ensureEventsFile(
-      process.env.MD_EVENTS_FILE || path.resolve(process.cwd(), "events.md"),
+      resolveDataPath("events"),
     );
     const before = eventsFile.events.length;
     eventsFile.events = eventsFile.events.filter((e) => e.uid !== uid);
@@ -389,7 +395,7 @@ function createLinkedEvent(
   cal: { date: string; allDay?: boolean; end?: string },
 ): string {
   const eventsFile = ensureEventsFile(
-    process.env.MD_EVENTS_FILE || path.resolve(process.cwd(), "events.md"),
+    resolveDataPath("events"),
   );
   const uid = `md-event-${Date.now()}-${Math.random()
     .toString(36)
@@ -424,7 +430,7 @@ function updateLinkedEvent(
 ): void {
   try {
     const eventsFile = ensureEventsFile(
-      process.env.MD_EVENTS_FILE || path.resolve(process.cwd(), "events.md"),
+      resolveDataPath("events"),
     );
     const ev = eventsFile.events.find((e) => e.uid === uid);
     if (ev) {
