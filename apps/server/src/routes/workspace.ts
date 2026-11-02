@@ -8,6 +8,7 @@ import {
   newItemId,
   workspaceFilePath,
   collectLists,
+  attachSubtaskProgress,
   type WorkbenchItem,
   type ParsedItem,
   type ItemKind,
@@ -67,6 +68,7 @@ workspaceRouter.get("/items", async (req, res) => {
       includeDone = "true",
       expand = "false",
       list,
+      topLevel = "false",
     } = req.query as Record<string, string | undefined>;
 
     const ws = readWorkspace();
@@ -115,10 +117,17 @@ workspaceRouter.get("/items", async (req, res) => {
       items = expanded as any;
     }
 
+    // 挂上子任务进度（父任务显示 2/5、进度条等）
+    let out: any[] = attachSubtaskProgress(items as any);
+    // topLevel=true 时只返回顶层条目（子任务由前端单独取）
+    if (topLevel === "true") {
+      out = out.filter((i) => !i.parent);
+    }
+
     res.json({
       success: true,
-      items,
-      count: items.length,
+      items: out,
+      count: out.length,
       filePath: ws.filePath,
       notes: ws.notes,
     });
@@ -202,6 +211,7 @@ workspaceRouter.post("/items", async (req, res) => {
       "location",
       "status",
       "list",
+      "parent",
     ]);
     const unknown = Object.keys(body).filter((k) => !ALLOWED.has(k));
     if (unknown.length) {
@@ -236,6 +246,7 @@ workspaceRouter.post("/items", async (req, res) => {
       priority: body.priority,
       recurrence: body.recurrence || undefined,
       list: body.list || undefined,
+      parent: body.parent || undefined,
       project: body.project || undefined,
       tags: Array.isArray(body.tags) ? body.tags : undefined,
       description: body.description || undefined,
@@ -327,6 +338,7 @@ workspaceRouter.put("/items/:id", async (req, res) => {
       "location",
       "status",
       "list",
+      "parent",
     ]);
 
     const next: WorkbenchItem = { ...current };

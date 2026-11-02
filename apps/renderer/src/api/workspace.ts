@@ -29,6 +29,8 @@ export interface WorkbenchItem {
   recurrence?: string;
   /** 所属清单；空值表示收件箱 */
   list?: string;
+  /** 父条目 id（子任务） */
+  parent?: string;
   project?: string;
   tags?: string[];
   description?: string;
@@ -41,6 +43,13 @@ export interface WorkbenchItem {
   instanceDate?: string;
   /** 解析错误（服务端会带上，便于界面提示） */
   errors?: string[];
+  // ---- 子任务统计（服务端计算，只读）----
+  /** 直接子任务总数 */
+  subtaskTotal?: number;
+  /** 已完成子任务数 */
+  subtaskDone?: number;
+  /** 进度百分比 0-100 */
+  progress?: number;
 }
 
 export interface ItemQuery {
@@ -54,6 +63,8 @@ export interface ItemQuery {
   list?: string;
   /** 是否把重复事件展开成多个实例 */
   expand?: boolean;
+  /** 只返回顶层条目（不带子任务） */
+  topLevel?: boolean;
 }
 
 export interface ValidationReport {
@@ -81,6 +92,7 @@ export async function fetchItems(
     params.includeDone = String(query.includeDone);
   }
   if (query.expand) params.expand = "true";
+  if (query.topLevel) params.topLevel = "true";
   // 注意：空字符串是有效值（收件箱），不能用真值判断
   if (query.list !== undefined) params.list = query.list;
 

@@ -73,6 +73,17 @@ export interface WorkbenchItem {
    * （空清单没有意义，也不需要持久化）。
    */
   list?: string;
+  /**
+   * 父条目 id —— 用于子任务。
+   *
+   * 子任务本身也是普通条目，只是多指了一个父级。
+   * 这样不需要嵌套数据结构，md 里所有条目依然是平铺的独立块，
+   * 单条改动不会牵连整棵树（对 AI 编辑友好）。
+   *
+   * 加这个字段时**不引入递归深度限制以外的任何约束**：
+   * 父子关系是自由图，服务端只负责展示时组装。
+   */
+  parent?: string;
   project?: string;
   tags?: string[];
   description?: string;
@@ -302,6 +313,7 @@ function buildItem(
     priority,
     recurrence: raw.recurrence || undefined,
     list: raw.list || undefined,
+    parent: raw.parent || undefined,
     project: raw.project || undefined,
     tags: raw.tags
       ? raw.tags
@@ -388,6 +400,7 @@ export function serializeWorkspace(items: WorkbenchItem[], notes?: string): stri
     if (item.priority) out.push(`- priority: ${item.priority}`);
     if (item.recurrence) out.push(`- recurrence: ${item.recurrence}`);
     if (item.list) out.push(`- list: ${item.list}`);
+    if (item.parent) out.push(`- parent: ${item.parent}`);
     if (item.project) out.push(`- project: ${item.project}`);
     if (item.tags && item.tags.length) {
       out.push(`- tags: ${item.tags.join(", ")}`);
@@ -526,6 +539,7 @@ export function validateItem(item: Partial<WorkbenchItem>): string[] {
     "priority",
     "recurrence",
     "list",
+    "parent",
     "project",
     "tags",
     "description",
@@ -668,6 +682,9 @@ export function collectLists(items: ParsedItem[]): ListSummary[] {
     // 清单只装**任务** —— 事件属于日历，不参与清单统计。
     // （否则「收件箱」会把纯事件也算进去，与看板视图看到的数量对不上）
     if (it.kind !== "task") continue;
+    // 子任务不单独计入清单统计 —— 否则「父任务 + 3 个子任务」会让
+    // 清单显示 4 条，而看板上只看到 1 个父任务，数量对不上。
+    if (it.parent) continue;
     const key = it.list || "";
     const cur = map.get(key) ?? { total: 0, open: 0, overdue: 0 };
     cur.total++;
@@ -698,4 +715,65 @@ export function collectLists(items: ParsedItem[]): ListSummary[] {
     if (b.name === "" && a.name !== "") return 1;
     return a.label.localeCompare(b.label, "zh-CN");
   });
+}
+
+// ===== 子任务 =====
+
+/** 带子任务统计的条目（用于看板渲染） */
+export interface ItemWithProgress extends ParsedItem {
+  /** 直接子任务总数 */
+  subtaskTotal?: number;
+  /** 已完成的子任务数 */
+  subtaskDone?: number;
+  /** 进度百分比 0-100；无子任务时缺省 */
+  progress?: number;
+}
+
+/**
+ * 给条目附加子任务进度。
+ *
+ * 只统计**直接子任务**（一级），不做递归 —— 递归进度容易让用户困惑
+ * （「我明明勾完了 3 个，为什么父任务还是 40%？」）。
+ *
+ * 子任务的完成状态不会自动回写父任务的 done —— 那是用户的判断。
+ * 这里只提供数据，UI 决定怎么展示。
+ */
+export function attachSubtaskProgress(
+  items: ParsedItem[],
+): ItemWithProgress[] {
+  // 先按 parent 分组
+  const kidsByParent = new Map<string, ParsedItem[]>();
+  for (const it of items) {
+    if (!it.parent || it.errors) continue;
+    const arr = kidsByParent.get(it.parent) ?? [];
+    arr.push(it);
+    kidsByParent.set(it.parent, arr);
+  }
+
+  return items.map((it) => {
+    const kids = kidsByParent.get(it.id);
+    if (!kids || kids.length === 0) return { ...it };
+    const done = kids.filter((k) => k.done).length;
+    return {
+      ...it,
+      subtaskTotal: kids.length,
+      subtaskDone: done,
+      progress: Math.round((done / kids.length) * 100),
+    };
+  });
+}
+
+/**
+ * 取出顶层条目（没有 parent 的），并挂上子任务进度。
+ *
+ * 用于看板主列表 —— 子任务不单独占一行，而是显示在父任务下面。
+ */
+export function topLevelWithProgress(items: ParsedItem[]): ItemWithProgress[] {
+  const withProgress = attachSubtaskProgress(items);
+  return withProgress.filter((it) => !it.parent);
+}
+
+/** 取某个父任务的所有子任务 */
+export function childrenOf(items: ParsedItem[], parentId: string): ParsedItem[] {
+  return items.filter((it) => it.parent === parentId && !it.errors);
 }

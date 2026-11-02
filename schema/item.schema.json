@@ -72,6 +72,11 @@
       "description": "所属清单（类似待办应用的「列表」）。空值表示收件箱 —— 快速捕获、尚未归类。清单不需要预先创建，由条目聚合得出。",
       "maxLength": 50
     },
+    "parent": {
+      "type": "string",
+      "description": "父条目 id，用于子任务。子任务本身也是普通条目，只是多指向一个父级 —— 这样 md 里所有条目保持平铺，单条改动不牵连整棵树。",
+      "pattern": "^[0-9a-f]{8}$"
+    },
     "project": {
       "type": "string",
       "description": "Project or category this entry belongs to.",

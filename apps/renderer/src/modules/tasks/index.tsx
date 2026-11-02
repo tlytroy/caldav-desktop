@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Plus,
   Check,
@@ -11,6 +11,7 @@ import {
   Repeat,
   Inbox,
   FolderOpen,
+  ListChecks,
 } from "lucide-react";
 import {
   fetchItems,
@@ -82,6 +83,11 @@ export default function TasksPage() {
   const [activeList, setActiveList] = useState<string | undefined>(undefined);
   // 新建任务时归入的清单（默认跟随当前视图）
   const [newList, setNewList] = useState("");
+  /** 哪些父任务展开了子任务 */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** 正在给哪个任务加子任务（inline 输入） */
+  const [addingChildFor, setAddingChildFor] = useState<string | null>(null);
+  const [childTitle, setChildTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -215,6 +221,43 @@ export default function TasksPage() {
     }
   };
 
+  /** 展开 / 收起子任务 */
+  const toggleExpand = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /**
+   * 给父任务加子任务。
+   *
+   * 子任务继承父任务的清单 —— 否则它会落到收件箱，
+   * 用户在当前清单里看不到刚加的子任务。
+   */
+  const addChild = async (parent: WorkbenchItem) => {
+    const title = childTitle.trim();
+    if (!title) return;
+    try {
+      await createItem({
+        title,
+        kind: "task",
+        parent: parent.id,
+        list: parent.list || undefined,
+        done: false,
+      });
+      setChildTitle("");
+      setAddingChildFor(null);
+      setExpanded((prev) => new Set(prev).add(parent.id));
+      showToast("已添加子任务");
+      await load();
+    } catch (e) {
+      showToast("添加失败：" + (e as Error).message);
+    }
+  };
+
   /**
    * 当前清单下的条目。
    * undefined = 全部；"" = 收件箱（list 为空）；其他 = 该清单。
@@ -224,14 +267,26 @@ export default function TasksPage() {
     return items.filter((i) => (i.list || "") === activeList);
   }, [items, activeList]);
 
+  /** 顶层条目（不含子任务）—— 主列表只渲染这些 */
+  const topItems = useMemo(
+    () => (visibleItems || []).filter((i) => !i.parent),
+    [visibleItems],
+  );
+
+  /** 取某个父任务的直接子任务 */
+  const kidsOf = useCallback(
+    (parentId: string) => (visibleItems || []).filter((i) => i.parent === parentId),
+    [visibleItems],
+  );
+
   const { open, done, overdue } = useMemo(() => {
-    const todos = visibleItems || [];
+    const todos = topItems || [];
     return {
       open: todos.filter((t) => !t.done),
       done: todos.filter((t) => t.done),
       overdue: todos.filter(isOverdue),
     };
-  }, [visibleItems]);
+  }, [topItems]);
 
   if (loading && !items.length) {
     return (
@@ -452,8 +507,8 @@ export default function TasksPage() {
             {(["high", "mid", "low"] as const)
               .flatMap((p) => open.filter((t) => t.priority === p))
               .map((t) => (
+                <React.Fragment key={t.id}>
                 <div
-                  key={t.id}
                   className="group flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-neutral-800 hover:bg-gray-100 dark:hover:bg-neutral-700/60 transition-colors"
                 >
                   <button
@@ -511,6 +566,27 @@ export default function TasksPage() {
                       )}
                     </div>
                   </div>
+                  {/* 子任务按钮：有子任务时显示进度，无子任务时可添加 */}
+                  <button
+                    onClick={() => {
+                      if (t.subtaskTotal) {
+                        toggleExpand(t.id);
+                      } else {
+                        setAddingChildFor(t.id);
+                        setExpanded((prev) => new Set(prev).add(t.id));
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] shrink-0 transition-colors ${
+                      t.subtaskTotal
+                        ? "text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-neutral-700"
+                        : "opacity-0 group-hover:opacity-100 text-gray-400 hover:text-brand hover:bg-white dark:hover:bg-neutral-900"
+                    }`}
+                    title={t.subtaskTotal ? "展开/收起子任务" : "添加子任务"}
+                  >
+                    <ListChecks className="w-3.5 h-3.5" />
+                    {t.subtaskTotal ? `${t.subtaskDone}/${t.subtaskTotal}` : ""}
+                  </button>
+
                   {!t.start && (
                     <button
                       onClick={() => {
@@ -532,6 +608,91 @@ export default function TasksPage() {
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
+
+                {/* 进度条：有子任务时显示 */}
+                {!!t.subtaskTotal && (
+                  <div className="ml-8 mr-3 -mt-1 mb-1">
+                    <div className="h-1 rounded-full bg-gray-200 dark:bg-neutral-700 overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${t.progress === 100 ? "bg-green-500" : "bg-brand"}`}
+                        style={{ width: `${t.progress ?? 0}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 展开的子任务区 */}
+                {expanded.has(t.id) && (
+                  <div className="ml-8 mr-3 mt-1 space-y-1">
+                    {kidsOf(t.id).map((k) => (
+                      <div
+                        key={k.id}
+                        className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-neutral-700/60"
+                      >
+                        <button
+                          onClick={() => toggle(k)}
+                          className="w-4 h-4 rounded border-2 border-gray-300 dark:border-gray-600 flex items-center justify-center shrink-0 hover:border-brand"
+                          title="标记完成"
+                        >
+                          {k.done && <Check className="w-2.5 h-2.5 text-brand" />}
+                        </button>
+                        <span
+                          className={`flex-1 text-sm truncate ${
+                            k.done
+                              ? "line-through text-gray-400 dark:text-gray-500"
+                              : "text-gray-700 dark:text-gray-200"
+                          }`}
+                        >
+                          {k.title}
+                        </span>
+                        <button
+                          onClick={() => setPendingDelete(k)}
+                          className="opacity-0 group-hover:opacity-100 p-1 rounded text-gray-400 hover:text-red-500"
+                          title="删除子任务"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* 加子任务 */}
+                    {addingChildFor === t.id ? (
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                        <input
+                          autoFocus
+                          value={childTitle}
+                          onChange={(e) => setChildTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") addChild(t);
+                            if (e.key === "Escape") {
+                              setAddingChildFor(null);
+                              setChildTitle("");
+                            }
+                          }}
+                          placeholder="子任务标题，回车添加"
+                          className="flex-1 px-2 py-1 text-sm rounded border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-brand"
+                        />
+                        <button
+                          onClick={() => addChild(t)}
+                          className="px-2 py-1 text-xs rounded bg-brand text-white"
+                        >
+                          添加
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setAddingChildFor(t.id);
+                          setChildTitle("");
+                        }}
+                        className="ml-6 text-xs text-gray-400 hover:text-brand py-1"
+                      >
+                        + 加子任务
+                      </button>
+                    )}
+                  </div>
+                )}
+                </React.Fragment>
               ))}
           </div>
         )}

@@ -12,6 +12,9 @@ import {
   filterItems,
   newItemId,
   collectLists,
+  attachSubtaskProgress,
+  topLevelWithProgress,
+  childrenOf,
   type WorkbenchItem,
 } from "../workspace.js";
 
@@ -603,5 +606,109 @@ describe("清单（List）", () => {
         list: "工作",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("子任务", () => {
+  const withSubs = () => parseWorkspace(`## 准备竞聘材料
+- id: aaa11111
+- kind: task
+- list: 竞聘
+
+## 第一部分
+- id: bbb22222
+- kind: task
+- parent: aaa11111
+- done: true
+
+## 第二部分
+- id: ccc33333
+- kind: task
+- parent: aaa11111
+
+## 第三部分
+- id: ddd44444
+- kind: task
+- parent: aaa11111
+`);
+
+  it("parent 字段能往返", () => {
+    const text = serializeWorkspace([
+      { id: "bbb22222", kind: "task", title: "子任务", parent: "aaa11111" },
+    ]);
+    const ws = parseWorkspace(text);
+    expect(ws.items[0].parent).toBe("aaa11111");
+  });
+
+  it("父任务带出子任务进度", () => {
+    const items = attachSubtaskProgress(withSubs().items);
+    const parent = items.find((i) => i.id === "aaa11111")!;
+    expect(parent.subtaskTotal).toBe(3);
+    expect(parent.subtaskDone).toBe(1);
+    // 1/3 ≈ 33%
+    expect(parent.progress).toBe(33);
+  });
+
+  it("子任务自己不携带子任务统计", () => {
+    const items = attachSubtaskProgress(withSubs().items);
+    const kid = items.find((i) => i.id === "bbb22222")!;
+    expect(kid.subtaskTotal).toBeUndefined();
+    expect(kid.progress).toBeUndefined();
+  });
+
+  it("topLevelWithProgress 只返回顶层条目", () => {
+    const top = topLevelWithProgress(withSubs().items);
+    expect(top).toHaveLength(1);
+    expect(top[0].id).toBe("aaa11111");
+    expect(top[0].subtaskTotal).toBe(3);
+  });
+
+  it("childrenOf 取直接子任务", () => {
+    const kids = childrenOf(withSubs().items, "aaa11111");
+    expect(kids).toHaveLength(3);
+    expect(kids.map((k) => k.id).sort()).toEqual([
+      "bbb22222",
+      "ccc33333",
+      "ddd44444",
+    ]);
+  });
+
+  it("子任务不计入清单统计（避免数量虚高）", () => {
+    const lists = collectLists(withSubs().items);
+    const jp = lists.find((l) => l.name === "竞聘")!;
+    // 只有父任务算 1 条，3 个子任务不计
+    expect(jp.total).toBe(1);
+  });
+
+  it("没有子任务时进度字段缺省", () => {
+    const ws = parseWorkspace(`## 独立任务
+- id: eee55555
+- kind: task
+`);
+    const items = attachSubtaskProgress(ws.items);
+    expect(items[0].subtaskTotal).toBeUndefined();
+    expect(items[0].progress).toBeUndefined();
+  });
+
+  it("子任务全部完成时进度为 100", () => {
+    const ws = parseWorkspace(`## 父
+- id: aaa11111
+- kind: task
+
+## 子1
+- id: bbb22222
+- kind: task
+- parent: aaa11111
+- done: true
+
+## 子2
+- id: ccc33333
+- kind: task
+- parent: aaa11111
+- done: true
+`);
+    const items = attachSubtaskProgress(ws.items);
+    const parent = items.find((i) => i.id === "aaa11111")!;
+    expect(parent.progress).toBe(100);
   });
 });
