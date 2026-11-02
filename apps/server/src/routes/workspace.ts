@@ -13,6 +13,11 @@ import {
 } from "../workspace.js";
 import { expandEventInstances, describeRRule } from "../recurrence.js";
 import { expandRecurrenceDates, parseRRule } from "../recurrence.js";
+import {
+  itemsToIcs,
+  parseIcsEvents,
+  icsEventToItem,
+} from "../ics-convert.js";
 
 export const workspaceRouter = express.Router();
 
@@ -505,6 +510,192 @@ workspaceRouter.get("/info", async (_req, res) => {
       tasks: ws.items.filter((i) => i.kind === "task").length,
       events: ws.items.filter((i) => i.kind === "event").length,
       scheduled: ws.items.filter((i) => !!i.start).length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// ===== ICS 导入 / 导出 =====
+//
+// 这是整个系统里**唯一**的格式转换边界。
+// workspace.md 是我们自定义的格式，ICS 是 RFC 5545 标准（别的软件只认它），
+// 所以只有这里需要转换，其余一切（日历视图、看板、AI 工具）都直接读写 md。
+
+/**
+ * POST /api/workspace/ics/import
+ *
+ * 把一份 .ics 导入到统一数据源。
+ *
+ * Body:
+ *  - icsContent: string（必需）
+ *  - mode: "append"（默认）| "replace"
+ *  - kind: "event"（默认）| "task" —— 导入的条目算事件还是任务
+ *  - dryRun: boolean —— 只解析不落盘
+ *  - skipDuplicates: boolean（默认 true）—— 按 id 去重
+ */
+workspaceRouter.post("/ics/import", async (req, res) => {
+  try {
+    const {
+      icsContent,
+      mode = "append",
+      kind = "event",
+      dryRun = false,
+      skipDuplicates = true,
+    } = req.body || {};
+
+    if (!icsContent || typeof icsContent !== "string") {
+      return res.status(400).json({ error: "icsContent is required" });
+    }
+
+    const icsEvents = parseIcsEvents(icsContent);
+    if (icsEvents.length === 0) {
+      return res.status(400).json({
+        error: "这份 .ics 里没有可解析的事件",
+        hint: "确认文件包含 BEGIN:VEVENT 块，且每个事件有 SUMMARY 与 DTSTART",
+      });
+    }
+
+    const ws = readWorkspace();
+    const existingIds = new Set(ws.items.map((i) => i.id));
+
+    // 转换 + 去重
+    const incoming: WorkbenchItem[] = [];
+    let skipped = 0;
+    for (const ev of icsEvents) {
+      const item = icsEventToItem(ev, {
+        kind: kind === "task" ? "task" : "event",
+      });
+      if (skipDuplicates && existingIds.has(item.id)) {
+        skipped++;
+        continue;
+      }
+      incoming.push(item);
+      existingIds.add(item.id);
+    }
+
+    // 预览模式：不落盘
+    if (dryRun) {
+      return res.json({
+        success: true,
+        dryRun: true,
+        parsed: icsEvents.length,
+        toImport: incoming.length,
+        skipped,
+        preview: incoming.slice(0, 20).map((i) => ({
+          id: i.id,
+          title: i.title,
+          start: i.start,
+          allDay: i.allDay,
+          recurrence: i.recurrence,
+        })),
+      });
+    }
+
+    const base = mode === "replace" ? [] : ws.items;
+    const items = [...base, ...incoming];
+    const file = writeWorkspace(items, ws.notes);
+
+    res.json({
+      success: true,
+      imported: incoming.length,
+      skipped,
+      total: items.length,
+      filePath: file,
+    });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * GET /api/workspace/ics/export
+ *
+ * 导出为 .ics 文件。
+ *
+ * 查询参数：
+ *  - start / end: 日期范围（本地日历日）
+ *  - scope: all | calendar | board
+ *  - download: 1 时直接下载文件
+ *  - expand: 1 时把重复事件展开成多个独立事件（默认不展开，
+ *            因为 ICS 支持 RRULE，保持规则更省空间且可编辑）
+ */
+workspaceRouter.get("/ics/export", async (req, res) => {
+  try {
+    const {
+      start,
+      end,
+      scope = "all",
+      download = "0",
+      expand = "0",
+    } = req.query as Record<string, string | undefined>;
+
+    const ws = readWorkspace();
+    let items = filterItems(ws.items, {
+      scope: scope as any,
+      start,
+      end,
+      includeDone: true,
+    });
+
+    // 可选：展开重复事件成独立条目
+    if (expand === "1") {
+      const rangeStart = start || localDate(new Date());
+      const rangeEnd =
+        end ||
+        (() => {
+          const d = new Date();
+          d.setDate(d.getDate() + 365);
+          return localDate(d);
+        })();
+      const expanded: WorkbenchItem[] = [];
+      for (const it of items) {
+        if (!it.recurrence || !it.start) {
+          expanded.push(it);
+          continue;
+        }
+        for (const inst of expandEventInstances(
+          it.start,
+          it.end,
+          it.recurrence,
+          rangeStart,
+          rangeEnd,
+        )) {
+          expanded.push({
+            ...it,
+            id: it.id,
+            start: inst.start,
+            end: inst.end,
+            recurrence: undefined,
+          });
+        }
+      }
+      items = expanded;
+    }
+
+    if (items.length === 0) {
+      return res.status(404).json({
+        error: "没有可导出的条目",
+        hint: "检查日期范围，或确认数据源里已有条目",
+      });
+    }
+
+    const ics = itemsToIcs(items);
+
+    if (download === "1") {
+      const stamp = localDate(new Date());
+      res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="workbench-${stamp}.ics"`,
+      );
+      return res.send(ics);
+    }
+
+    res.json({
+      success: true,
+      ics,
+      count: items.length,
     });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });

@@ -25,12 +25,13 @@ import {
   Check,
 } from 'lucide-react';
 import type { WorkbenchItem } from '../api/workspace';
-import { fetchRecurrenceOptions, type RecurrenceOption } from '../api/workspace';
 import {
-  importIcsFile,
+  fetchRecurrenceOptions,
+  importIcs,
   exportIcsDownloadUrl,
+  type RecurrenceOption,
   type IcsImportPreview,
-} from '../api/md-bridge';
+} from '../api/workspace';
 import {
   fetchWebDAVStatus,
   pushToWebDAV,
@@ -365,12 +366,12 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
     setIoMsg(null);
     try {
       const text = await file.text();
-      const preview = (await importIcsFile(text, { dryRun: true })) as IcsImportPreview;
+      const preview = await importIcs(text, { dryRun: true });
       setPendingIcsText(text);
       setImportPreview(preview);
-      if (preview.importedCount === 0) {
+      if (preview.toImport === 0) {
         setIoMsg(
-          `解析到 ${preview.parsedCount} 条事件，但都已存在（跳过 ${preview.skippedCount} 条），无需导入`,
+          `解析到 ${preview.parsed} 条，但都已存在（跳过 ${preview.skipped} 条），无需导入`,
         );
       }
     } catch (err) {
@@ -387,13 +388,13 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
     if (!pendingIcsText) return;
     setImporting(true);
     try {
-      const r = await importIcsFile(pendingIcsText, {
+      const r = await importIcs(pendingIcsText, {
         mode: replaceOnImport ? 'replace' : 'append',
       });
-      const n = (r as any).importedCount ?? 0;
-      const skipped = (r as any).skippedCount ?? 0;
+      const n = r.imported ?? 0;
+      const skipped = r.skipped ?? 0;
       setIoMsg(
-        `已导入 ${n} 条事件${skipped ? `，跳过 ${skipped} 条重复` : ''}，events.md 现有 ${(r as any).totalCount} 条`,
+        `已导入 ${n} 条${skipped ? `，跳过 ${skipped} 条重复` : ''}，数据源现有 ${r.total ?? 0} 条`,
       );
       setImportPreview(null);
       setPendingIcsText(null);
@@ -548,43 +549,45 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
               <div className="p-3 rounded-lg bg-gray-50 dark:bg-neutral-800">
                 <div className="text-xs text-gray-500 dark:text-gray-400">解析到</div>
                 <div className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {importPreview.parsedCount}
+                  {importPreview.parsed}
                 </div>
               </div>
               <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20">
                 <div className="text-xs text-green-600 dark:text-green-400">将导入</div>
                 <div className="text-lg font-semibold text-green-700 dark:text-green-300">
-                  {importPreview.importedCount}
+                  {importPreview.toImport}
                 </div>
               </div>
               <div className="p-3 rounded-lg bg-gray-50 dark:bg-neutral-800">
                 <div className="text-xs text-gray-500 dark:text-gray-400">跳过重复</div>
                 <div className="text-lg font-semibold text-gray-500 dark:text-gray-400">
-                  {importPreview.skippedCount}
+                  {importPreview.skipped}
                 </div>
               </div>
             </div>
 
-            {importPreview.events.length > 0 && (
+            {importPreview.preview.length > 0 && (
               <div>
                 <div className="text-xs text-gray-500 mb-1.5">
                   前 5 条预览
                 </div>
                 <ul className="text-sm divide-y divide-gray-100 dark:divide-neutral-800">
-                  {importPreview.events.slice(0, 5).map((e, i) => (
+                  {importPreview.preview.slice(0, 5).map((e, i) => (
                     <li key={i} className="py-1.5 flex items-center gap-2">
                       <span className="flex-1 text-gray-900 dark:text-white truncate">
                         {e.title}
                       </span>
                       <span className="text-xs text-gray-400 shrink-0">
-                        {e.allDay ? '全天' : String(e.date).slice(0, 16).replace('T', ' ')}
+                        {e.allDay
+                          ? '全天'
+                          : String(e.start || '').slice(0, 16).replace('T', ' ')}
                       </span>
                     </li>
                   ))}
                 </ul>
-                {importPreview.events.length > 5 && (
+                {importPreview.preview.length > 5 && (
                   <div className="text-xs text-gray-400 mt-1">
-                    还有 {importPreview.events.length - 5} 条…
+                    还有 {importPreview.preview.length - 5} 条…
                   </div>
                 )}
               </div>
@@ -617,10 +620,10 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
               </button>
               <button
                 onClick={confirmImport}
-                disabled={importing || importPreview.importedCount === 0}
+                disabled={importing || importPreview.toImport === 0}
                 className={`px-4 py-2 text-sm text-white bg-brand ${borderRadius} hover:opacity-90 disabled:opacity-50`}
               >
-                {importing ? '导入中…' : `确认导入 ${importPreview.importedCount} 条`}
+                {importing ? '导入中…' : `确认导入 ${importPreview.toImport} 条`}
               </button>
             </div>
           </div>

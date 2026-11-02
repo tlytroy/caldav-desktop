@@ -162,3 +162,69 @@ export function describeRecurrence(rule?: string): string {
   };
   return map[rule] || rule;
 }
+
+// ===== ICS 导入 / 导出 =====
+// 这是唯一需要格式转换的地方：md 是我们自定义的，ics 是标准格式。
+
+export interface IcsImportPreview {
+  parsed: number;
+  toImport: number;
+  skipped: number;
+  preview: Array<{
+    id: string;
+    title: string;
+    start?: string;
+    allDay?: boolean;
+    recurrence?: string;
+  }>;
+}
+
+/** 导入 .ics（dryRun=true 时只预览不落盘） */
+export async function importIcs(
+  icsContent: string,
+  opts: {
+    mode?: "append" | "replace";
+    kind?: "task" | "event";
+    dryRun?: boolean;
+    skipDuplicates?: boolean;
+  } = {},
+): Promise<IcsImportPreview & { imported?: number; total?: number; filePath?: string }> {
+  const { data } = await api.post("/api/workspace/ics/import", {
+    icsContent,
+    mode: opts.mode ?? "append",
+    kind: opts.kind ?? "event",
+    dryRun: opts.dryRun ?? false,
+    skipDuplicates: opts.skipDuplicates ?? true,
+  });
+  return data;
+}
+
+/** 导出 .ics 文本 */
+export async function exportIcs(opts: {
+  start?: string;
+  end?: string;
+  scope?: "all" | "calendar" | "board";
+  expand?: boolean;
+} = {}): Promise<{ ics: string; count: number }> {
+  const params: Record<string, string> = {};
+  if (opts.start) params.start = opts.start;
+  if (opts.end) params.end = opts.end;
+  if (opts.scope) params.scope = opts.scope;
+  if (opts.expand) params.expand = "1";
+  const { data } = await api.get("/api/workspace/ics/export", { params });
+  return data;
+}
+
+/** 导出下载链接（用于 <a download> 或 window.open） */
+export function exportIcsDownloadUrl(opts: {
+  start?: string;
+  end?: string;
+  scope?: "all" | "calendar" | "board";
+} = {}): string {
+  const base = import.meta.env.VITE_API_URL || "";
+  const params = new URLSearchParams({ download: "1" });
+  if (opts.start) params.set("start", opts.start);
+  if (opts.end) params.set("end", opts.end);
+  if (opts.scope) params.set("scope", opts.scope);
+  return `${base}/api/workspace/ics/export?${params.toString()}`;
+}
