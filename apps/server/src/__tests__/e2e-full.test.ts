@@ -11,6 +11,18 @@
  * 7. 标签、分类、重复事件
  */
 
+/**
+ * ⚠️ 这两个 e2e 测试需要**真实运行的 CalDAV 服务器**。
+ *
+ * 默认跳过 —— 因为「本地优先」是本工具的设计前提：
+ * 没有服务器时也应该能完整使用本地功能，测试套件更不该因此变红。
+ *
+ * 要跑这些测试：
+ *   RUN_E2E=1 pnpm vitest run src/__tests__/e2e-full.test.ts
+ * 且 .env 里的 CALDAV_URL / CALDAV_USER / CALDAV_PASS 指向可用服务器。
+ */
+const RUN_E2E = process.env.RUN_E2E === "1";
+
 import {
   describe,
   it,
@@ -92,7 +104,7 @@ function makeTask(overrides: Partial<BridgeEvent> = {}): BridgeEvent {
 
 // ===== Test Suite =====
 
-describe("E2E: MD Bridge Full Suite", () => {
+describe.skipIf(!RUN_E2E)("E2E: MD Bridge Full Suite", () => {
   const mdEventsPath = path.resolve(__dirname, "../../../events.fulltest.md");
   let targetCal: DAVCalendar;
 

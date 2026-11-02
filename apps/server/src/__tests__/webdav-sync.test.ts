@@ -129,8 +129,7 @@ function simulateExternalEdit(p: string, content: string): string {
 
 // ===== 测试环境 =====
 let tmpDir: string;
-let eventsFile: string;
-let kanbanFile: string;
+let wsFile: string;
 let apiServer: http.Server;
 let baseUrl: string;
 let webdavRouter: any;
@@ -139,12 +138,11 @@ let normalizeEtag: any;
 let readSyncState: any;
 let savedEnv: Record<string, string | undefined>;
 
-const EVENTS_REMOTE = "/dav/CalDAV-Desktop/events.md";
+const WORKSPACE_REMOTE = "/dav/CalDAV-Desktop/workspace.md";
 
 beforeAll(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "webdav-test-"));
-  eventsFile = path.join(tmpDir, "events.md");
-  kanbanFile = path.join(tmpDir, "工作搭子看板.md");
+  wsFile = path.join(tmpDir, "workspace.md");
 
   await new Promise<void>((r) => davServer.listen(0, r));
   baseUrl = `http://127.0.0.1:${(davServer.address() as any).port}/dav/`;
@@ -177,12 +175,10 @@ beforeAll(async () => {
     WEBDAV_USER: process.env.WEBDAV_USER,
     WEBDAV_PASS: process.env.WEBDAV_PASS,
     WEBDAV_EVENTS_PATH: process.env.WEBDAV_EVENTS_PATH,
-    MD_EVENTS_FILE: process.env.MD_EVENTS_FILE,
-    KANBAN_FILE_PATH: process.env.KANBAN_FILE_PATH,
+    WORKSPACE_FILE: process.env.WORKSPACE_FILE,
     APP_CONFIG_PATH: process.env.APP_CONFIG_PATH,
   };
-  process.env.MD_EVENTS_FILE = eventsFile;
-  process.env.KANBAN_FILE_PATH = kanbanFile;
+  process.env.WORKSPACE_FILE = wsFile;
 
   ({ webdavRouter } = await import("../routes/webdav.js"));
   const wd = await import("../webdav.js");
@@ -270,27 +266,30 @@ describe("WebDAV 配置", () => {
 });
 
 describe("WebDAV push", () => {
-  it("首次 push 创建远端目录并上传双文件", async () => {
-    fs.writeFileSync(eventsFile, "---\nevents:\n---\n本地事件\n", "utf-8");
-    fs.writeFileSync(kanbanFile, "# 工作搭子看板\n## 待办\n- [ ] 测试 | id:k-1\n", "utf-8");
+  it("首次 push 创建远端目录并上传统一数据源", async () => {
+    fs.writeFileSync(
+      wsFile,
+      "---\nschema: workbench/v1\n---\n\n## 本地条目\n- id: aaa11111\n- kind: task\n",
+      "utf-8",
+    );
 
     const r = await post("/api/webdav/push");
     expect(r.json.success).toBe(true);
-    expect(r.json.results).toHaveLength(2);
+    // 统一数据源只有**一个**文件
+    expect(r.json.results).toHaveLength(1);
     expect(createdDirs.size).toBeGreaterThan(0);
-    expect(remoteStore.get(EVENTS_REMOTE)?.content).toContain("本地事件");
+    expect(remoteStore.get(WORKSPACE_REMOTE)?.content).toContain("本地条目");
   });
 
-  it("push 后同步状态记录了两个文件", () => {
-    const st = readSyncState(eventsFile);
-    expect(Object.keys(st.etags)).toHaveLength(2);
-    expect(st.etags["events.md"]).toBeTruthy();
-    expect(st.etags["工作搭子看板.md"]).toBeTruthy();
+  it("push 后同步状态记录了文件 ETag", () => {
+    const st = readSyncState(wsFile);
+    expect(Object.keys(st.etags)).toHaveLength(1);
+    expect(st.etags["workspace.md"]).toBeTruthy();
   });
 
   it("status 反映真实远端状态", async () => {
     const r = await get("/api/webdav/status");
-    const ev = r.json.files.find((f: any) => f.key === "events");
+    const ev = r.json.files.find((f: any) => f.key === "workspace");
     expect(ev.remote.exists).toBe(true);
     expect(ev.remote.etag).toBeTruthy();
     expect(ev.local.exists).toBe(true);
@@ -299,72 +298,77 @@ describe("WebDAV push", () => {
 
   it("远端无变化时走 ETag 乐观锁", async () => {
     const r = await post("/api/webdav/push");
-    const ev = r.json.results.find((x: any) => x.key === "events");
+    const ev = r.json.results.find((x: any) => x.key === "workspace");
     expect(r.json.success).toBe(true);
     expect(ev.forced).toBe(false);
   });
 
   it("远端被其他设备修改时检测出冲突且不覆盖", async () => {
-    const externalEtag = simulateExternalEdit(EVENTS_REMOTE, "远端被别的设备改了\n");
+    const externalEtag = simulateExternalEdit(WORKSPACE_REMOTE, "远端被别的设备改了\n");
     const r = await post("/api/webdav/push");
-    const ev = r.json.results.find((x: any) => x.key === "events");
+    const ev = r.json.results.find((x: any) => x.key === "workspace");
     expect(ev.conflict).toBe(true);
     expect(ev.localEtag).not.toBe(ev.remoteEtag);
     // 关键：远端内容不能被静默覆盖
-    expect(remoteStore.get(EVENTS_REMOTE)?.content).toContain("远端被别的设备改了");
-    expect(remoteStore.get(EVENTS_REMOTE)?.etag).toBe(externalEtag);
+    expect(remoteStore.get(WORKSPACE_REMOTE)?.content).toContain("远端被别的设备改了");
+    expect(remoteStore.get(WORKSPACE_REMOTE)?.etag).toBe(externalEtag);
   });
 
   it("force 可强制覆盖冲突", async () => {
+    // 自己准备数据，不依赖前一个测试留下的文件内容
+    fs.writeFileSync(wsFile, "本地事件\n", "utf-8");
     const r = await post("/api/webdav/push", { force: true });
     expect(r.json.success).toBe(true);
-    const ev = r.json.results.find((x: any) => x.key === "events");
+    const ev = r.json.results.find((x: any) => x.key === "workspace");
     expect(ev.forced).toBe(true);
-    expect(remoteStore.get(EVENTS_REMOTE)?.content).toContain("本地事件");
+    expect(remoteStore.get(WORKSPACE_REMOTE)?.content).toContain("本地事件");
   });
 
   it("可只同步指定文件", async () => {
-    fs.writeFileSync(eventsFile, "只推 events\n", "utf-8");
-    const r = await post("/api/webdav/push", { files: ["events"], force: true });
+    fs.writeFileSync(wsFile, "只推 workspace\n", "utf-8");
+    const r = await post("/api/webdav/push", { files: ["workspace"], force: true });
     expect(r.json.results).toHaveLength(1);
-    expect(r.json.results[0].key).toBe("events");
+    expect(r.json.results[0].key).toBe("workspace");
   });
 
-  it("本地文件缺失时报错且不影响其他文件", async () => {
-    fs.unlinkSync(kanbanFile);
+  it("本地文件缺失时如实报错（不静默成功）", async () => {
+    fs.unlinkSync(wsFile);
     const r = await post("/api/webdav/push", { force: true });
-    const kb = r.json.results.find((x: any) => x.key === "kanban");
-    expect(kb.ok).toBe(false);
-    expect(kb.error).toMatch(/不存在/);
-    expect(r.json.results.find((x: any) => x.key === "events").ok).toBe(true);
+    const ws = r.json.results.find((x: any) => x.key === "workspace");
+    expect(ws.ok).toBe(false);
+    expect(ws.error).toMatch(/不存在/);
   });
 });
 
 describe("WebDAV pull", () => {
   it("远端有更新时覆盖本地并备份原文件", async () => {
-    simulateExternalEdit(EVENTS_REMOTE, "---\nevents:\n---\n远端新内容\n");
+    // 自备本地文件（前一个测试会删掉它），并先同步一次建立基线 ETag
+    fs.writeFileSync(wsFile, "本地旧内容\n", "utf-8");
+    await post("/api/webdav/push", { force: true });
+
+    simulateExternalEdit(WORKSPACE_REMOTE, "---\nevents:\n---\n远端新内容\n");
     const r = await post("/api/webdav/pull");
-    const ev = r.json.results.find((x: any) => x.key === "events");
+    const ev = r.json.results.find((x: any) => x.key === "workspace");
     expect(ev.ok).toBe(true);
     expect(ev.overwritten).toBe(true);
-    expect(fs.readFileSync(eventsFile, "utf-8")).toContain("远端新内容");
+    expect(fs.readFileSync(wsFile, "utf-8")).toContain("远端新内容");
     // 备份存在且内容是拉取前的本地版本
-    expect(fs.existsSync(`${eventsFile}.bak`)).toBe(true);
+    expect(fs.existsSync(`${wsFile}.bak`)).toBe(true);
   });
 
   it("远端无变化时跳过，不冲掉本地改动", async () => {
-    fs.writeFileSync(eventsFile, "本地又改了\n", "utf-8");
+    fs.writeFileSync(wsFile, "本地又改了\n", "utf-8");
     const r = await post("/api/webdav/pull");
-    const ev = r.json.results.find((x: any) => x.key === "events");
+    const ev = r.json.results.find((x: any) => x.key === "workspace");
     expect(ev.skipped).toBe(true);
-    expect(fs.readFileSync(eventsFile, "utf-8")).toContain("本地又改了");
+    expect(fs.readFileSync(wsFile, "utf-8")).toContain("本地又改了");
   });
 
   it("force 可强制拉取覆盖", async () => {
     const r = await post("/api/webdav/pull", { force: true });
-    const ev = r.json.results.find((x: any) => x.key === "events");
+    const ev = r.json.results.find((x: any) => x.key === "workspace");
     expect(ev.overwritten).toBe(true);
-    expect(fs.readFileSync(eventsFile, "utf-8")).toContain("远端新内容");
+    expect(fs.readFileSync(wsFile, "utf-8")).toContain("远端新内容");
   });
 });
 

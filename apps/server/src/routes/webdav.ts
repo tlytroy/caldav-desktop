@@ -1,17 +1,15 @@
 /**
  * WebDAV 同步 API 路由
  *
- * 与 CalDAV 通道的分工（见 REF/MD_ICS_BRIDGE.md）：
- *   - CalDAV 通道：events.md → ICS → CalDAV 服务器（跨日历软件互通）
- *   - WebDAV 通道：md 文件本身 ↔ WebDAV 服务器（**无需 ICS 转换**）
+ * 与 CalDAV 通道的分工：
+ *   - **WebDAV 通道**：workspace.md ↔ WebDAV 服务器（直接传文件，**无需转换**）
+ *     这是「云同步」的主力 —— 多设备写同一份数据，且 md 仍是本地事实源，
+ *     AI 随时能读写。坚果云 / Nextcloud / ownCloud / Box 都支持。
+ *   - **CalDAV 通道**：workspace.md → ICS → CalDAV 服务器（跨日历软件互通）
+ *     手机自带日历、Outlook、Google Calendar 靠这条。
  *
- * WebDAV 通道的价值：用户可能没有 CalDAV 服务器，但只要有任意支持 WebDAV
- * 的云盘（Nextcloud / ownCloud / 坚果云 / Box）就能多设备同步，
- * 且 md 仍是唯一事实源、AI 仍可直接读写。
- *
- * 同步的 md 文件：
- *   - events.md（日历事件）
- *   - 工作搭子看板.md（待办 / 项目 / 速记）
+ * 同步的 md 文件：**只有 workspace.md**（统一数据源）。
+ * 旧的 events.md 与 工作搭子看板.md 已合并进 workspace.md，不再单独同步。
  */
 
 import express from "express";
@@ -34,20 +32,21 @@ export const webdavRouter = express.Router();
 /**
  * 当前要参与同步的本地文件清单。
  *
+ * 现在只有**一个文件** —— workspace.md（统一数据源）。
+ *
+ * 为什么不再同步 events.md 与 工作搭子看板.md：
+ * 那两个文件是旧「双文件 + 双向绑定」架构的产物，已经合并进 workspace.md。
+ * 同步两个已废弃的文件只会制造混乱（两边不一致时以谁为准？）。
+ *
  * 路径来源统一走 config.ts 的 resolveDataPath()：
  *   环境变量 > config.json（界面可改）> 默认值
  */
-function syncTargets(cfg: WebDAVConfig) {
+function syncTargets(_cfg: WebDAVConfig) {
   return [
     {
-      key: "events",
-      localPath: resolveDataPath("events"),
-      filename: "events.md",
-    },
-    {
-      key: "kanban",
-      localPath: resolveDataPath("kanban"),
-      filename: "工作搭子看板.md",
+      key: "workspace",
+      localPath: resolveDataPath("workspace"),
+      filename: "workspace.md",
     },
   ];
 }
@@ -187,7 +186,7 @@ webdavRouter.post("/push", async (req, res) => {
 
   const wanted: string[] = Array.isArray(req.body?.files)
     ? req.body.files
-    : ["events", "kanban"];
+    : syncTargets(effectiveConfig()).map((t) => t.key);
   const force = req.body?.force === true;
 
   const results: Array<Record<string, unknown>> = [];
@@ -274,7 +273,7 @@ webdavRouter.post("/pull", async (req, res) => {
 
   const wanted: string[] = Array.isArray(req.body?.files)
     ? req.body.files
-    : ["events", "kanban"];
+    : syncTargets(effectiveConfig()).map((t) => t.key);
   const force = req.body?.force === true;
 
   const results: Array<Record<string, unknown>> = [];

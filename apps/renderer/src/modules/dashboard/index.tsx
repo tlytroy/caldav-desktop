@@ -13,8 +13,7 @@ import {
 } from "lucide-react";
 import { useCalendarStore } from "../../store/calendarStore";
 import { useSyncStore } from "../../store/syncStore";
-import { fetchKanban, type KanbanTodo } from "../../api/kanban";
-import { fetchMdEvents, type MdEvent } from "../../api/md-bridge";
+import { fetchItems, type WorkbenchItem } from "../../api/workspace";
 
 /**
  * DashboardPage - 工作台首页
@@ -42,56 +41,58 @@ export default function DashboardPage() {
   } = useSyncStore();
 
   /**
-   * 日历事件直接读 events.md（与日历模块同一数据源）。
+   * 工作台读**统一数据源**（workspace.md）——与日历、看板完全同源。
    *
    * 历史 bug：这里原先读 syncStore.cachedEvents，但数据流重构后
-   * useCalendarEvents 已改为直接读 events.md，不再写入该缓存，
-   * 于是「今日事件」「N 个事件」恒为 0 —— 页面看着正常，全是空的。
+   * 该缓存已无人写入，于是「今日事件」「N 个事件」恒为 0 ——
+   * 页面看着正常，全是空的。
+   *
+   * 现在一次拿到全部条目，本地按 scope 分拣：
+   *  - 有 start 的 → 日历事件
+   *  - kind=task 的 → 看板任务
    */
-  const [mdEvents, setMdEvents] = useState<MdEvent[]>([]);
+  const [items, setItems] = useState<WorkbenchItem[]>([]);
   useEffect(() => {
-    fetchMdEvents()
-      .then((r) => setMdEvents(r.events || []))
-      .catch(() => setMdEvents([]));
+    fetchItems()
+      .then((r) => setItems(r.items || []))
+      .catch(() => setItems([]));
   }, []);
 
-  // 看板任务（工作搭子）——让工作台成为任务 hub
-  const [kanbanTodos, setKanbanTodos] = useState<KanbanTodo[]>([]);
-  useEffect(() => {
-    fetchKanban()
-      .then((d) => setKanbanTodos(d.todos || []))
-      .catch(() => setKanbanTodos([]));
-  }, []);
+  // 日历事件：有开始时间的（任务与事件都算）
+  const calEvents = useMemo(() => items.filter((i) => !!i.start), [items]);
 
-  const openTodos = kanbanTodos.filter((t) => !t.done);
+  // 看板任务：kind=task
+  const allTodos = useMemo(() => items.filter((i) => i.kind === "task"), [items]);
+  const openTodos = allTodos.filter((t) => !t.done);
   const overdueTodos = openTodos.filter(
     (t) => t.due && new Date(t.due).getTime() < Date.now(),
   );
 
-  // 计算今日事件（来自 events.md）
+  // 计算今日事件（来自统一数据源）
   const todayEvents = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    return mdEvents
+    return calEvents
       .filter((e) => {
-        const start = new Date(e.date);
+        const start = new Date(e.start!);
         return start >= today && start < tomorrow;
       })
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .sort((a, b) => new Date(a.start!).getTime() - new Date(b.start!).getTime())
       .map((e) => ({
-        uid: e.uid,
-        title: e.title || "无标题事件",
-        start: e.date,
+        uid: e.id,
+        title: e.title || "无标题条目",
+        start: e.start!,
         end: e.end,
         allDay: !!e.allDay,
+        kind: e.kind,
       }));
-  }, [mdEvents]);
+  }, [calEvents]);
 
-  // 事件总数直接来自 events.md
-  const totalEvents = mdEvents.length;
+  // 事件总数
+  const totalEvents = calEvents.length;
 
   // 格式化同步时间
   const formatSyncTime = (timestamp: number | null): string => {
@@ -272,14 +273,14 @@ export default function DashboardPage() {
               >
                 <span
                   className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${
-                    t.priority === "高"
+                    t.priority === "high"
                       ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300"
-                      : t.priority === "中"
-                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
-                        : "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300"
+                      : t.priority === "low"
+                        ? "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300"
+                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
                   }`}
                 >
-                  {t.priority}
+                  {t.priority === "high" ? "高" : t.priority === "low" ? "低" : "中"}
                 </span>
                 <span className="flex-1 text-sm text-gray-900 dark:text-white truncate">
                   {t.title}
