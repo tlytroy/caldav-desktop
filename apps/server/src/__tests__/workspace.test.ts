@@ -11,6 +11,7 @@ import {
   buildValidationReport,
   filterItems,
   newItemId,
+  collectLists,
   type WorkbenchItem,
 } from "../workspace.js";
 
@@ -482,5 +483,125 @@ describe("id 生成", () => {
   it("不重复", () => {
     const set = new Set(Array.from({ length: 200 }, () => newItemId()));
     expect(set.size).toBe(200);
+  });
+});
+
+describe("清单（List）", () => {
+  it("list 字段能往返", () => {
+    const text = serializeWorkspace([
+      { id: "aaa11111", kind: "task", title: "写周报", list: "工作" },
+    ]);
+    const ws = parseWorkspace(text);
+    expect(ws.items[0].list).toBe("工作");
+  });
+
+  it("按清单筛选；空串表示收件箱", () => {
+    const items: WorkbenchItem[] = [
+      { id: "aaa11111", kind: "task", title: "在收件箱" },
+      { id: "bbb22222", kind: "task", title: "在工作清单", list: "工作" },
+      { id: "ccc33333", kind: "task", title: "也在工作", list: "工作" },
+    ];
+    expect(filterItems(items, { list: "" })).toHaveLength(1);
+    expect(filterItems(items, { list: "" })[0].title).toBe("在收件箱");
+    expect(filterItems(items, { list: "工作" })).toHaveLength(2);
+    // 不传 list = 不筛选
+    expect(filterItems(items, {})).toHaveLength(3);
+  });
+
+  it("聚合出清单列表，收件箱排第一", () => {
+    const ws = parseWorkspace(`## 收件箱的东西
+- id: aaa11111
+- kind: task
+
+## 工作的事
+- id: bbb22222
+- kind: task
+- list: 工作
+
+## 工作另一件
+- id: ccc33333
+- kind: task
+- list: 工作
+
+## 个人
+- id: ddd44444
+- kind: task
+- list: 个人
+`);
+    const lists = collectLists(ws.items);
+    expect(lists).toHaveLength(3);
+    // 收件箱第一
+    expect(lists[0].name).toBe("");
+    expect(lists[0].label).toBe("收件箱");
+    expect(lists[0].open).toBe(1);
+    // 工作有 2 条
+    const work = lists.find((l) => l.name === "工作")!;
+    expect(work.open).toBe(2);
+  });
+
+  it("统计未完成数与逾期数", () => {
+    const ws = parseWorkspace(`## 逾期任务
+- id: aaa11111
+- kind: task
+- list: 工作
+- due: 2020-01-01
+
+## 已完成
+- id: bbb22222
+- kind: task
+- list: 工作
+- done: true
+- due: 2020-01-01
+`);
+    const lists = collectLists(ws.items);
+    const work = lists.find((l) => l.name === "工作")!;
+    expect(work.total).toBe(2);
+    expect(work.open).toBe(1);
+    expect(work.overdue).toBe(1); // 已完成的不算逾期
+  });
+
+  it("坏条目不计入清单统计", () => {
+    const ws = parseWorkspace(`## 好的
+- id: aaa11111
+- kind: task
+- list: 工作
+
+## 坏的
+- id: bbb22222
+- kind: 瞎写
+- list: 工作
+`);
+    const lists = collectLists(ws.items);
+    const work = lists.find((l) => l.name === "工作")!;
+    expect(work.total).toBe(1);
+  });
+
+  it("清单只统计任务，不把事件算进来", () => {
+    const ws = parseWorkspace(`## 一个任务
+- id: aaa11111
+- kind: task
+- list: 工作
+
+## 一个事件
+- id: bbb22222
+- kind: event
+- start: 2026-11-03T10:00:00
+- list: 工作
+`);
+    const lists = collectLists(ws.items);
+    const work = lists.find((l) => l.name === "工作")!;
+    // 事件属于日历，不参与清单统计
+    expect(work.total).toBe(1);
+  });
+
+  it("validateItem 接受 list 字段", () => {
+    expect(
+      validateItem({
+        id: "aaa11111",
+        kind: "task",
+        title: "x",
+        list: "工作",
+      }),
+    ).toEqual([]);
   });
 });

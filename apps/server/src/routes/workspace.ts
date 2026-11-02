@@ -7,6 +7,7 @@ import {
   filterItems,
   newItemId,
   workspaceFilePath,
+  collectLists,
   type WorkbenchItem,
   type ParsedItem,
   type ItemKind,
@@ -65,6 +66,7 @@ workspaceRouter.get("/items", async (req, res) => {
       end,
       includeDone = "true",
       expand = "false",
+      list,
     } = req.query as Record<string, string | undefined>;
 
     const ws = readWorkspace();
@@ -74,6 +76,8 @@ workspaceRouter.get("/items", async (req, res) => {
       start,
       end,
       includeDone: includeDone !== "false",
+      // list 未传 = 不筛选；传空串 = 只看收件箱
+      list: list !== undefined ? list : undefined,
     });
 
     // ---- 重复事件展开 ----
@@ -197,6 +201,7 @@ workspaceRouter.post("/items", async (req, res) => {
       "description",
       "location",
       "status",
+      "list",
     ]);
     const unknown = Object.keys(body).filter((k) => !ALLOWED.has(k));
     if (unknown.length) {
@@ -230,6 +235,7 @@ workspaceRouter.post("/items", async (req, res) => {
       done: body.done ?? false,
       priority: body.priority,
       recurrence: body.recurrence || undefined,
+      list: body.list || undefined,
       project: body.project || undefined,
       tags: Array.isArray(body.tags) ? body.tags : undefined,
       description: body.description || undefined,
@@ -320,6 +326,7 @@ workspaceRouter.put("/items/:id", async (req, res) => {
       "description",
       "location",
       "status",
+      "list",
     ]);
 
     const next: WorkbenchItem = { ...current };
@@ -697,6 +704,67 @@ workspaceRouter.get("/ics/export", async (req, res) => {
       ics,
       count: items.length,
     });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// ===== 清单 =====
+
+/**
+ * GET /api/workspace/lists
+ *
+ * 返回所有清单及其统计。清单不需要预先创建 —— 它是条目上的一个字段值，
+ * 由条目聚合而来。空清单没有意义，所以不单独持久化。
+ *
+ * 「收件箱」= list 为空的条目（快速捕获、还没归类的东西），永远排第一。
+ */
+workspaceRouter.get("/lists", async (_req, res) => {
+  try {
+    const ws = readWorkspace();
+    const lists = collectLists(ws.items);
+    res.json({
+      success: true,
+      lists,
+      totalLists: lists.length,
+    });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+/**
+ * POST /api/workspace/lists/rename
+ *
+ * 重命名清单（把所有 list=from 的条目改成 list=to）。
+ * 传 to: "" 表示并回收件箱。
+ */
+workspaceRouter.post("/lists/rename", async (req, res) => {
+  try {
+    const { from, to } = req.body || {};
+    if (typeof from !== "string" || typeof to !== "string") {
+      return res.status(400).json({ error: "from 与 to 都必须是字符串" });
+    }
+    if (from === to) {
+      return res.status(400).json({ error: "from 与 to 相同，无需重命名" });
+    }
+
+    const ws = readWorkspace();
+    let changed = 0;
+    const items = ws.items.map((it) => {
+      if ((it.list || "") === from) {
+        changed++;
+        return { ...it, list: to || undefined };
+      }
+      return it;
+    });
+
+    if (changed === 0) {
+      return res.status(404).json({ error: `找不到清单：${from || "收件箱"}` });
+    }
+
+    const file = writeWorkspace(items, ws.notes);
+    res.json({ success: true, changed, filePath: file });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }

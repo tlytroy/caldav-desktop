@@ -5,7 +5,11 @@
   "description": "Single entry in workspace.md. Every entry describes one thing you need to do or attend to. Modules (calendar / board / quick-create) are views over this same entry pool - there is no separate task table.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "kind", "title"],
+  "required": [
+    "id",
+    "kind",
+    "title"
+  ],
   "properties": {
     "id": {
       "type": "string",
@@ -15,7 +19,10 @@
     "kind": {
       "type": "string",
       "description": "Entry type. 'task' = something to finish; 'event' = something to attend. A task with a start time shows up in BOTH the board and the calendar.",
-      "enum": ["task", "event"]
+      "enum": [
+        "task",
+        "event"
+      ]
     },
     "title": {
       "type": "string",
@@ -49,12 +56,21 @@
     "priority": {
       "type": "string",
       "description": "Task priority.",
-      "enum": ["high", "mid", "low"]
+      "enum": [
+        "high",
+        "mid",
+        "low"
+      ]
     },
     "recurrence": {
       "type": "string",
       "description": "RFC 5545 RRULE subset. Supported: FREQ=DAILY | WEEKLY | MONTHLY | YEARLY, plus BYDAY (MO,TU,WE,TH,FR,SA,SU), BYMONTHDAY (1-31), INTERVAL, COUNT, UNTIL.",
       "pattern": "^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;.*)?$"
+    },
+    "list": {
+      "type": "string",
+      "description": "所属清单（类似待办应用的「列表」）。空值表示收件箱 —— 快速捕获、尚未归类。清单不需要预先创建，由条目聚合得出。",
+      "maxLength": 50
     },
     "project": {
       "type": "string",
@@ -64,7 +80,10 @@
     "tags": {
       "type": "array",
       "description": "Free-form labels.",
-      "items": { "type": "string", "maxLength": 50 }
+      "items": {
+        "type": "string",
+        "maxLength": 50
+      }
     },
     "description": {
       "type": "string",
@@ -79,7 +98,12 @@
     "status": {
       "type": "string",
       "description": "Calendar-style status.",
-      "enum": ["confirmed", "tentative", "cancelled", "needs-action"]
+      "enum": [
+        "confirmed",
+        "tentative",
+        "cancelled",
+        "needs-action"
+      ]
     },
     "createdAt": {
       "type": "string",

@@ -27,6 +27,8 @@ export interface WorkbenchItem {
   done?: boolean;
   priority?: ItemPriority;
   recurrence?: string;
+  /** 所属清单；空值表示收件箱 */
+  list?: string;
   project?: string;
   tags?: string[];
   description?: string;
@@ -48,6 +50,8 @@ export interface ItemQuery {
   start?: string;
   end?: string;
   includeDone?: boolean;
+  /** 只看某个清单；空字符串 = 收件箱 */
+  list?: string;
   /** 是否把重复事件展开成多个实例 */
   expand?: boolean;
 }
@@ -77,6 +81,8 @@ export async function fetchItems(
     params.includeDone = String(query.includeDone);
   }
   if (query.expand) params.expand = "true";
+  // 注意：空字符串是有效值（收件箱），不能用真值判断
+  if (query.list !== undefined) params.list = query.list;
 
   const { data } = await api.get("/api/workspace/items", { params });
   return {
@@ -227,4 +233,27 @@ export function exportIcsDownloadUrl(opts: {
   if (opts.end) params.set("end", opts.end);
   if (opts.scope) params.set("scope", opts.scope);
   return `${base}/api/workspace/ics/export?${params.toString()}`;
+}
+
+// ===== 清单 =====
+
+export interface ListSummary {
+  /** 清单名；空字符串表示收件箱 */
+  name: string;
+  label: string;
+  total: number;
+  open: number;
+  overdue: number;
+}
+
+/** 拉取所有清单（由条目聚合，不需要预先创建） */
+export async function fetchLists(): Promise<ListSummary[]> {
+  const { data } = await api.get("/api/workspace/lists");
+  return data.lists || [];
+}
+
+/** 重命名清单（to 传空串表示并回收件箱） */
+export async function renameList(from: string, to: string): Promise<number> {
+  const { data } = await api.post("/api/workspace/lists/rename", { from, to });
+  return data.changed ?? 0;
 }

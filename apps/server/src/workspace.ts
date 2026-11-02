@@ -65,6 +65,14 @@ export interface WorkbenchItem {
   priority?: ItemPriority;
   /** RFC 5545 RRULE 子集 */
   recurrence?: string;
+  /**
+   * 所属清单（类似滴答清单的「列表」）。
+   *
+   * 空值 = 收件箱（Inbox）—— 快速捕获、还没归类的东西。
+   * 清单不需要预先定义，直接按条目上的值聚合即可
+   * （空清单没有意义，也不需要持久化）。
+   */
+  list?: string;
   project?: string;
   tags?: string[];
   description?: string;
@@ -293,6 +301,7 @@ function buildItem(
     done,
     priority,
     recurrence: raw.recurrence || undefined,
+    list: raw.list || undefined,
     project: raw.project || undefined,
     tags: raw.tags
       ? raw.tags
@@ -378,6 +387,7 @@ export function serializeWorkspace(items: WorkbenchItem[], notes?: string): stri
     if (item.done !== undefined) out.push(`- done: ${item.done}`);
     if (item.priority) out.push(`- priority: ${item.priority}`);
     if (item.recurrence) out.push(`- recurrence: ${item.recurrence}`);
+    if (item.list) out.push(`- list: ${item.list}`);
     if (item.project) out.push(`- project: ${item.project}`);
     if (item.tags && item.tags.length) {
       out.push(`- tags: ${item.tags.join(", ")}`);
@@ -515,6 +525,7 @@ export function validateItem(item: Partial<WorkbenchItem>): string[] {
     "done",
     "priority",
     "recurrence",
+    "list",
     "project",
     "tags",
     "description",
@@ -576,6 +587,8 @@ export function filterItems(
     start?: string;
     end?: string;
     includeDone?: boolean;
+    /** 只看某个清单；空字符串表示「收件箱」（list 为空的条目） */
+    list?: string;
   } = {},
 ): ParsedItem[] {
   let out = items.filter((i) => !i.errors);
@@ -597,6 +610,11 @@ export function filterItems(
     out = out.filter((i) => !i.start || new Date(i.start).getTime() <= e);
   }
 
+  if (opts.list !== undefined) {
+    // 空字符串 = 收件箱（还没归类的）
+    out = out.filter((i) => (i.list || "") === opts.list);
+  }
+
   if (opts.includeDone === false) {
     out = out.filter((i) => !i.done);
   }
@@ -608,5 +626,76 @@ export function filterItems(
     const at = a.start ?? a.due ?? "9999";
     const bt = b.start ?? b.due ?? "9999";
     return at.localeCompare(bt);
+  });
+}
+
+// ===== 清单（List）=====
+
+/** 清单摘要 */
+export interface ListSummary {
+  /** 清单名；空字符串表示收件箱 */
+  name: string;
+  /** 展示名（收件箱有专属名字） */
+  label: string;
+  /** 该清单下条目总数 */
+  total: number;
+  /** 未完成数 */
+  open: number;
+  /** 逾期数 */
+  overdue: number;
+}
+
+/** 收件箱的展示名 */
+export const INBOX_LABEL = "收件箱";
+
+/**
+ * 从条目聚合出清单列表。
+ *
+ * 清单**不需要预先定义** —— 它只是条目上的一个字段值。
+ * 空清单没有意义，所以不单独持久化，每次由条目算出来。
+ *
+ * 返回值：收件箱永远排第一（它是默认捕获入口），其余按名称排序。
+ */
+export function collectLists(items: ParsedItem[]): ListSummary[] {
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  const todayEnd = today.getTime();
+
+  const map = new Map<string, { total: number; open: number; overdue: number }>();
+
+  for (const it of items) {
+    if (it.errors) continue;
+    // 清单只装**任务** —— 事件属于日历，不参与清单统计。
+    // （否则「收件箱」会把纯事件也算进去，与看板视图看到的数量对不上）
+    if (it.kind !== "task") continue;
+    const key = it.list || "";
+    const cur = map.get(key) ?? { total: 0, open: 0, overdue: 0 };
+    cur.total++;
+    if (!it.done) {
+      cur.open++;
+      // 逾期：有截止日且已过今天
+      if (it.due && new Date(`${it.due}T00:00:00`).getTime() < todayEnd) {
+        // 只算「已经过了截止日当天」的
+        const dueEnd = new Date(`${it.due}T23:59:59`).getTime();
+        if (dueEnd < todayEnd) cur.overdue++;
+      }
+    }
+    map.set(key, cur);
+  }
+
+  const out: ListSummary[] = [];
+  for (const [name, stat] of map) {
+    out.push({
+      name,
+      label: name || INBOX_LABEL,
+      ...stat,
+    });
+  }
+
+  // 收件箱排第一，其余按名称
+  return out.sort((a, b) => {
+    if (a.name === "" && b.name !== "") return -1;
+    if (b.name === "" && a.name !== "") return 1;
+    return a.label.localeCompare(b.label, "zh-CN");
   });
 }

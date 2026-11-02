@@ -9,6 +9,8 @@ import {
   Loader2,
   StickyNote,
   Repeat,
+  Inbox,
+  FolderOpen,
 } from "lucide-react";
 import {
   fetchItems,
@@ -16,8 +18,10 @@ import {
   updateItem,
   deleteItem,
   fetchRecurrenceOptions,
+  fetchLists,
   type WorkbenchItem,
   type RecurrenceOption,
+  type ListSummary,
 } from "../../api/workspace";
 import { Modal } from "../../components/ui/Modal";
 
@@ -68,6 +72,16 @@ function isOverdue(t: WorkbenchItem): boolean {
  */
 export default function TasksPage() {
   const [items, setItems] = useState<WorkbenchItem[]>([]);
+  const [lists, setLists] = useState<ListSummary[]>([]);
+  /**
+   * 当前选中的清单。
+   *  - undefined → 全部
+   *  - ""        → 收件箱（list 为空）
+   *  - "工作"    → 该清单
+   */
+  const [activeList, setActiveList] = useState<string | undefined>(undefined);
+  // 新建任务时归入的清单（默认跟随当前视图）
+  const [newList, setNewList] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,10 +107,14 @@ export default function TasksPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
+      // 一次拉全部任务，清单切换在本地过滤 —— 避免每次切清单都请求
       const r = await fetchItems({ scope: "board" });
       setItems(r.items || []);
       setNotes(r.notes || "");
       setError(null);
+      // 清单统计由服务端聚合（含逾期数）
+      const ls = await fetchLists().catch(() => []);
+      setLists(ls);
     } catch (e) {
       setError((e as Error).message || "加载失败");
     } finally {
@@ -141,6 +159,8 @@ export default function TasksPage() {
       await createItem({
         title: title.trim(),
         kind: "task",
+        // 清单：跟随表单里选的值；选了「收件箱」就不写 list
+        list: newList || undefined,
         priority,
         due: due || undefined,
         start,
@@ -157,6 +177,7 @@ export default function TasksPage() {
       setEndTime("10:00");
       setProject("");
       setRecurrence("");
+      setNewList(activeList || "");
       setShowForm(false);
       showToast(hasTime ? "已添加任务" : "已添加任务（未设时间，不显示在日历）");
       await load();
@@ -194,14 +215,23 @@ export default function TasksPage() {
     }
   };
 
+  /**
+   * 当前清单下的条目。
+   * undefined = 全部；"" = 收件箱（list 为空）；其他 = 该清单。
+   */
+  const visibleItems = useMemo(() => {
+    if (activeList === undefined) return items;
+    return items.filter((i) => (i.list || "") === activeList);
+  }, [items, activeList]);
+
   const { open, done, overdue } = useMemo(() => {
-    const todos = items || [];
+    const todos = visibleItems || [];
     return {
       open: todos.filter((t) => !t.done),
       done: todos.filter((t) => t.done),
       overdue: todos.filter(isOverdue),
     };
-  }, [items]);
+  }, [visibleItems]);
 
   if (loading && !items.length) {
     return (
@@ -227,6 +257,52 @@ export default function TasksPage() {
         >
           <Plus className="w-4 h-4" /> 添加任务
         </button>
+      </div>
+
+      {/* 清单切换 */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* 全部 */}
+        <button
+          onClick={() => setActiveList(undefined)}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+            activeList === undefined
+              ? "bg-brand text-white"
+              : "bg-gray-100 dark:bg-neutral-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-700"
+          }`}
+        >
+          全部
+          <span className="text-xs opacity-70">{items.filter((i) => !i.done).length}</span>
+        </button>
+
+        {lists.map((l) => {
+          const active = activeList === l.name;
+          const isInbox = l.name === "";
+          return (
+            <button
+              key={l.name || "__inbox__"}
+              onClick={() => setActiveList(l.name)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                active
+                  ? "bg-brand text-white"
+                  : "bg-gray-100 dark:bg-neutral-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-700"
+              }`}
+              title={isInbox ? "还没归类的条目" : `清单：${l.name}`}
+            >
+              {isInbox ? (
+                <Inbox className="w-3.5 h-3.5" />
+              ) : (
+                <FolderOpen className="w-3.5 h-3.5" />
+              )}
+              {l.label}
+              <span className="text-xs opacity-70">{l.open}</span>
+              {l.overdue > 0 && (
+                <span className="text-xs px-1 rounded bg-red-500 text-white">
+                  {l.overdue}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* 逾期告警 */}
@@ -295,6 +371,21 @@ export default function TasksPage() {
               placeholder="项目"
               className="px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white"
             />
+            {/* 清单：可输入已有清单名，留空即收件箱 */}
+            <input
+              value={newList}
+              onChange={(e) => setNewList(e.target.value)}
+              placeholder="清单（留空=收件箱）"
+              list="workspace-lists"
+              className="px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white"
+            />
+            <datalist id="workspace-lists">
+              {lists
+                .filter((l) => l.name)
+                .map((l) => (
+                  <option key={l.name} value={l.name} />
+                ))}
+            </datalist>
             <select
               value={recurrence}
               onChange={(e) => setRecurrence(e.target.value)}
@@ -411,6 +502,13 @@ export default function TasksPage() {
                       )}
                       {t.due && !t.start && <span>截止 {t.due}</span>}
                       {t.project && <span>项目 {t.project}</span>}
+                      {/* 在「全部」视图下才显示清单名，避免当前清单里重复 */}
+                      {activeList === undefined && t.list && (
+                        <span className="inline-flex items-center gap-0.5">
+                          <FolderOpen className="w-3 h-3" />
+                          {t.list}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {!t.start && (
