@@ -5,6 +5,10 @@ import { AppShell } from "./app/AppShell";
 import { ThemeApplier } from "./theme/ThemeApplier";
 import { useCalendars } from "./hooks/useCalendars";
 import { useCalendarStore } from "./store/calendarStore";
+import ReminderHost from "./components/reminders/ReminderHost";
+import { GlobalErrorBoundary } from "./components/ui/ErrorBoundary";
+import { ConnectionBanner } from "./components/ConnectionBanner";
+import { AuthGate } from "./components/auth/AuthGate";
 
 import { testConnection, saveConfig } from "./api/calendar";
 import { useSyncStore } from "./store/syncStore";
@@ -89,16 +93,22 @@ export default function App() {
   // 如果启用模块化 UI
   if (useModularUI) {
     return (
-      <>
+      <GlobalErrorBoundary>
         <ThemeApplier />
-        <ModuleProvider>
+        {/* 后端不可达时的明确提示：不假装保存 */}
+        <ConnectionBanner />
+        <AuthGate>
+          <ModuleProvider>
           <ModuleRegistration>
             <AppLayout>
               <AppRouter />
             </AppLayout>
           </ModuleRegistration>
-        </ModuleProvider>
-      </>
+          {/* 全局提醒：不管在哪个页面，到点都在右下角弹卡片 */}
+            <ReminderHost />
+          </ModuleProvider>
+        </AuthGate>
+      </GlobalErrorBoundary>
     );
   }
 

@@ -1,0 +1,49 @@
+# Docker Compose —— NAS / 服务器常驻部署
+#
+# 启动：
+#   cp .env.example .env     # 至少填 WORKSPACE_FILE? 不用，compose 里已固定
+#   docker compose up -d --build
+#
+# 访问：http://<NAS 地址>:3001
+#
+# 数据卷：
+#   ./data/workspace.md   ← 唯一事实源（也可把已有的 workspace.md 拷进来）
+#   ./data/config.json    ← 界面里保存的配置（含推送密钥，注意权限）
+#
+# 提醒推送：在网页「通知推送」里配置渠道，后端 7×24 检查并推送。
+
+services:
+  caldav-desktop:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 国内网络可设 NPM_REGISTRY=https://registry.npmmirror.com
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        APK_MIRROR: ${APK_MIRROR:-dl-cdn.alpinelinux.org}
+    image: caldav-desktop:local
+    container_name: caldav-desktop
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      TZ: Asia/Shanghai
+      WORKSPACE_FILE: /data/workspace.md
+      APP_CONFIG_PATH: /data/config.json
+      STATIC_DIR: /app/public
+      # 容器内以 node 用户运行（uid/gid 1000，与多数桌面发行版首个用户一致）。
+      # 你的 uid 不是 1000 时改这里；先跑 id -u / id -g 看自己的值。
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    # 可选：让推送 / CalDAV 的密钥从 .env 注入（不写进镜像）
+    # env_file:
+    #   - .env
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

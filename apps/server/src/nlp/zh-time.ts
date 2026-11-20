@@ -189,7 +189,12 @@ export function parseNaturalLanguage(
   input: string,
   now: Date = new Date(),
 ): ParsedDraft | null {
-  const text = input.trim();
+  const text = input
+    .trim()
+    // 「明早 / 明晚」不是「明天」的常规写法，但口语很常见：
+    // 先展开成「明天早上 / 明天晚上」，后面的相对日 + 时段词就能直接复用。
+    .replace(/明早|明儿早/g, "明天早上")
+    .replace(/明晚|明儿晚/g, "明天晚上");
   if (!text) return null;
 
   const matchedFields: string[] = [];
@@ -393,6 +398,24 @@ export function parseNaturalLanguage(
     }
   }
 
+  // ---------- 6.5 「明年」修正 ----------
+  // 「明年1月1日」里的 1月1日 会被上面的绝对日期解析成最近一次（今年或明年）；
+  // 这里只在还停留在今年时补一年，并把「明年」从标题里去掉。
+  if (date && /明年/.test(text) && !/\d{4}/.test(text)) {
+    if (date.getFullYear() === now.getFullYear()) {
+      date = new Date(
+        date.getFullYear() + 1,
+        date.getMonth(),
+        date.getDate(),
+        date.getHours(),
+        date.getMinutes(),
+        date.getSeconds(),
+      );
+    }
+    matchedFields.push("明年");
+    titleSource = titleSource.replace(/明年/g, "");
+  }
+
   // ---------- 7. 时间：下午3点 / 15:30 / 3点半 ----------
   if (!time) {
     // 时段词
@@ -463,6 +486,17 @@ export function parseNaturalLanguage(
   if (rec.rule) {
     matchedFields.push(`重复：${rec.matched}`);
     titleSource = titleSource.replace(rec.matched, "");
+  }
+
+  // ---------- 9.5 「每周一三五」剩余周几 ----------
+  // detectRecurrence 只匹配「每周」，后面的「一三五」会残留在标题里。
+  const multiWeekday = text.match(/每\s*(?:周|星期|礼拜)\s*([一二三四五六日天]{2,})/);
+  if (multiWeekday && rec.rule === "weekly") {
+    // 「周一」可能已被星期解析吃掉，剩下的可能是「每三五」；按字符集剥，
+    // 不用整串匹配（整串此时往往已不完整）。
+    const run = multiWeekday[1];
+    const stripRun = new RegExp(`^每?[${run}]{1,7}`, "u");
+    titleSource = titleSource.replace(stripRun, "");
   }
 
   // ---------- 10. 整理标题 ----------

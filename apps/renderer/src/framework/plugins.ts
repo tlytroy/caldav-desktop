@@ -33,6 +33,7 @@
 
 import React from "react";
 import type { CalendarModule, RouteConfig, NavItem } from "./types";
+import { API_BASE_URL } from "../api/base";
 
 /** 插件描述文件（对应 JSON） */
 export interface PluginManifest {
@@ -235,7 +236,7 @@ export function manifestToModule(
 export async function fetchPluginManifests(
   baseUrl?: string,
 ): Promise<PluginManifest[]> {
-  const base = baseUrl ?? import.meta.env.VITE_API_URL ?? "";
+  const base = baseUrl ?? API_BASE_URL;
   const matched = pluginGlobMatchCount();
   if (matched === 0) {
     console.warn(

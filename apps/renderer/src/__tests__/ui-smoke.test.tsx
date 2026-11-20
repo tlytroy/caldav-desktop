@@ -21,6 +21,10 @@ vi.mock("axios", () => {
     patch: vi.fn(),
     delete: vi.fn(),
     create: () => mockAxios,
+    interceptors: {
+      request: { use: () => {} },
+      response: { use: () => {} },
+    },
   };
   return { default: mockAxios };
 });
@@ -37,41 +41,21 @@ function resp(data: any) {
 beforeAll(() => {
   // 所有请求返回空但合法的基础数据
   mockedAxios.get.mockImplementation((url: string) => {
-    if (url.includes("/api/md-bridge/events")) {
+    if (url.includes("/api/workspace/items")) {
       return Promise.resolve(
         resp({
           success: true,
-          events: [
+          items: [
             {
-              uid: "e1",
+              id: "e1",
+              kind: "event",
               title: "测试事件",
-              date: "2026-10-27T10:00:00",
+              start: "2026-10-27T10:00:00",
               end: "2026-10-27T11:00:00",
               allDay: false,
             },
           ],
-          body: "",
-          filePath: "./events.md",
-        }),
-      );
-    }
-    if (url.includes("/api/kanban")) {
-      return Promise.resolve(
-        resp({
-          success: true,
-          todos: [
-            {
-              id: "k1",
-              done: false,
-              priority: "高",
-              title: "测试任务",
-              due: "2026-10-28",
-            },
-          ],
-          projects: [],
-          notes: [],
-          body: "",
-          filePath: "./工作搭子看板.md",
+          count: 1,
         }),
       );
     }
@@ -121,7 +105,7 @@ beforeAll(() => {
               timeoutMs: 20000,
             },
             nlp: { preferAI: false, parserLocale: "zh-CN" },
-            paths: { eventsFile: "./events.md", kanbanFile: "./工作搭子看板.md" },
+            paths: { workspaceFile: "./workspace.md" },
           },
           file: { path: "/tmp/config.json", exists: true },
         }),

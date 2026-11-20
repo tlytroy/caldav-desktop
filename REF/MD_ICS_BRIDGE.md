@@ -1,319 +1,203 @@
-# MD ↔ ICS 桥接方案设计（重构版）
+# MD ↔ ICS 转换层（唯一需要格式转换的边界）
 
-## 核心思路：MD 文件即缓存，编辑即本地，同步即转换
+> **本文档描述当前实现**（2026-11-02 重写）。
+>
+> 旧版本叫「MD ↔ ICS 桥接方案」，描述的是 `events.md`（YAML frontmatter 里放
+> `events[]` 数组）+ `工作搭子看板.md` 双文件架构。**那套架构已经废弃**，
+> 文件格式、字段名、接口路径全部不再是本文档描述的内容。
+> 旧实现代码（`apps/server/src/md-ics-bridge.ts`、`routes/md-bridge.ts`、
+> `routes/kanban.ts`）已在 v0.3（P3）**删除**，不再是兼容路径 —— 现在只有
+> `apps/server/src/ics-convert.ts` 一处转换边界。
 
-### 核心原则
+## 为什么只剩这一处转换
 
-1. **一个专门的 MD 文件作为所有日历事件的本地缓存** — `events.md` 是唯一的真实数据源（SSOT）
-2. **编辑操作全在本地 MD 文件上进行** — 增/删/改事件都直接修改这个 MD 文件的 YAML frontmatter
-3. **ICS 是同步时的导出格式** — 仅在需要同步到 CalDAV 服务器时才将 MD 转换为 ICS
-4. **WebDAV 可直接同步 MD 文件本身** — 不搭建 CalDAV 也能通过同步 `events.md` 实现多设备
-5. **AI 友好** — AI 助手指需要读写一个结构化的 MD 文件，无需理解 ICS 协议
+统一数据源 `workspace.md` 是**我们自己定义的格式**，可以随意演进。
+而 ICS 是 **RFC 5545 标准**，Google / Outlook / Apple / 滴答清单 都认它，
+不能自定义。
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         events.md（唯一数据源）                        │
-│                                                                     │
-│  ---                                                                 │
-│  # 文件格式：YAML frontmatter 中包含所有日历事件                        │
-│  events:                                                             │
-│    - uid: "uuid-1"                                                   │
-│      title: "项目评审会议"                                            │
-│      date: "2026-08-18T14:00:00"                                     │
-│      end: "2026-08-18T15:30:00"                                      │
-│      allDay: false                                                   │
-│      status: confirmed                                               │
-│      category: "工作"                                                │
-│      tags: ["项目", "评审"]                                          │
-│      recurrence: "weekly"                                            │
-│      description: "项目进度评审会议"                                   │
-│      updated: "2026-08-18T10:00:00Z"                                 │
-│    - uid: "uuid-2"                                                   │
-│      title: "更新项目计划"                                            │
-│      date: "2026-08-20"                                              │
-│      allDay: true                                                    │
-│      status: needs-action                                            │
-│      category: "个人"                                                │
-│      tags: ["待办"]                                                  │
-│      description: "张三：更新项目计划"                                 │
-│      updated: "2026-08-18T10:00:00Z"                                 │
-│  ---                                                                 │
-│                                                                     │
-│  # 正文部分：AI 可以写入任何上下文信息                                  │
-│  ## 2026-08-18 项目评审会议                                           │
-│  - 张三汇报了项目进度，当前完成 80%                                    │
-│  - 李四提出了技术方案调整建议                                          │
-│  - 决定下周三再做一次评审                                              │
-│                                                                     │
-└──────────────────────────────────────────────────────────────────────┘
-         │                        │
-         ▼                        ▼
-┌─────────────────┐    ┌──────────────────────┐
-│  同步到 CalDAV   │    │  同步到 WebDAV（可选） │
-│  MD → ICS 转换   │    │  直接同步 events.md   │
-│  PUT .ics 文件   │    │  无需 ICS 转换        │
-└─────────────────┘    └──────────────────────┘
-```
-
-## 文件格式规范
-
-### events.md 结构
+所以整个系统里只有这一个边界需要格式转换：
 
 ```
----
-events:
-  - uid: "string"            # 唯一标识，自动生成或保留
-    title: "string"           # 事件标题（必填）
-    date: "ISO 8601"          # 开始日期/时间（必填）
-    end: "ISO 8601"           # 结束日期/时间
-    allDay: boolean           # 是否全天事件
-    status: "confirmed" | "tentative" | "cancelled" | "needs-action"
-    category: "string"        # 分类
-    tags: ["string"]          # 标签列表
-    recurrence: "daily" | "weekly" | "monthly" | "yearly"
-    description: "string"     # 描述/备注
-    updated: "ISO 8601"       # 最后更新时间
-    source: "caldav" | "md" | "ai"  # 来源标记
-    kanbanTaskId: "string"    # 关联的工作搭子任务 ID（工作台↔日历双向绑定；见下文）
-  - ...
----
+                     workspace.md（唯一事实源）
+                            │
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+   scope=calendar      scope=board         scope=all
+   （日历视图）         （看板视图）        （工作台 / AI）
+        │                   │                   │
+   直接读，不转换       直接读，不转换      直接读，不转换
+                            │
+                    ┌───────┴────────┐
+                    │                │
+              导出 .ics         导入 .ics
+                    │                │
+               CalDAV 服务器    Google/Outlook 导出文件
 ```
 
-### 设计理由
+- 日历视图、看板视图、快速创建、AI 工具 —— **全部直接读写 workspace.md，零转换**
+- 只有「与外部日历软件交换数据」时才经过 ICS
 
-| 特性                 | 说明                                                |
-| -------------------- | --------------------------------------------------- |
-| **单一文件**         | 避免碎片化，方便 WebDAV 同步，AI 只需要处理一个文件 |
-| **YAML frontmatter** | 标准的 Markdown 元数据格式，所有编辑器/渲染器都支持 |
-| **events 数组**      | 一个文件可容纳所有事件，结构清晰                    |
-| **正文部分**         | 可自由写入会议纪要、笔记等，AI 可从中提取新事件     |
-| **updated 字段**     | 用于冲突检测和增量同步                              |
+## 代码位置
 
-## 同步策略
+| 文件 | 职责 |
+| ---- | ---- |
+| `apps/server/src/ics-convert.ts` | **唯一转换实现**：`itemToIcsBlock` / `itemsToIcs` / `itemsToIcsMap` / `parseIcsEvents` / `icsEventToItem` |
+| `apps/server/src/recurrence.ts` | RRULE 解析/格式化/展开（ICS 与视图共用同一份规则） |
+| `apps/server/src/routes/workspace.ts` | `POST /ics/import`、`GET /ics/export` |
+| `apps/server/src/caldav-sync.ts` | CalDAV 同步引擎：逐对象 GET/PUT、ETag、字段指纹、冲突判定 |
+| `apps/server/src/routes/caldav-sync.ts` | `/api/caldav/*`（status / calendars / sync / test） |
+| `apps/server/src/caldav.ts` | 遗留的 tsdav 探测 / 日历列表（同步已不再走它） |
 
-### 同步时机：非实时（延时自动 + 手动）
+## 字段映射表
 
-`events.md` 是日历的**唯一事实源（SSOT）**，ICS 只是同步通道、不是首屏数据源：
+导出（workspace → ICS）：
 
-- 所有编辑（增/删/改，以及工作台↔日历双向绑定）都先落到 `events.md`；UI 首屏直接读 `events.md`，不依赖 CalDAV 在线。
-- ICS 同步**不需要实时**：通过「延时自动同步」（`MD_ICS_AUTO_SYNC_MINUTES`，后台定时器触发 `POST /api/md-bridge/sync/caldav`）与「手动同步」（UI 顶部 推送 / 拉取 / 双向同步 按钮）两种方式进行。
-- 拉取（CalDAV → MD）把远端事件合并进 `events.md`，但**保留本地关联字段**（见「关联保留语义」），不会把工作台↔日历绑定冲掉。
+| workspace 字段 | ICS 属性 | 说明 |
+| -------------- | -------- | ---- |
+| `uid` ?? `id` | `UID` | 有远端 UID 就用它；纯本地条目用 8 位 id。**回推不重复的关键** |
+| `title` | `SUMMARY` | 文本转义（`\` `;` `,` 换行） |
+| `start` | `DTSTART` / `DTSTART;VALUE=DATE` | 全天条目用 DATE 形式 |
+| `end` | `DTEND` | 全天条目**必须写次日 00:00**（见下） |
+| `allDay` | `VALUE=DATE` 参数 | |
+| `description` | `DESCRIPTION` | |
+| `location` | `LOCATION` | |
+| `project` | `X-WORKBENCH-PROJECT` | 私有属性；不写 CATEGORIES（否则回读会混进 tags） |
+| `tags[]` | `CATEGORIES` × N | **每个标签一行**，不 join |
+| `priority` | `PRIORITY` | high=1 / mid=5 / low=9 |
+| `status` | `STATUS` | 大写 |
+| `recurrence` | `RRULE` | 完整透传，见下 |
+| `createdAt` | `CREATED` | UTC（带 `Z`） |
+| `updatedAt` | `LAST-MODIFIED` | UTC（带 `Z`）；同时决定 `DTSTAMP` |
 
-### 方式一：CalDAV 同步（主力）
+`done` / `parent` / `list` 三个字段 **不进 ICS** —— 它们是看板侧语义，
+外部日历软件没有对应概念，写进去也是私货，读回来还得处理。
 
-```
-编辑 events.md
-    │
-    ▼
-用户点击"同步" / 定时自动同步
-    │
-    ▼
-读取 events.md 的 frontmatter
-    │
-    ▼
-遍历 events[] 数组
-    │
-    ├── 新增事件（无 uid 或 source="md"）
-    │   → 生成 UID
-    │   → 转换为 ICS
-    │   → PUT 到 CalDAV 服务器
-    │   → 更新 events.md 中的 uid 和 source="caldav"
-    │
-    ├── 修改事件（updated 比上次同步新）
-    │   → 转换为 ICS
-    │   → PUT 更新 CalDAV 服务器
-    │
-    └── 删除事件（标记 deleted 或从 events 移除）
-        → DELETE CalDAV 上的 .ics 文件
-```
+导入（ICS → workspace）：上表反向。另外：
 
-### 方式二：WebDAV 直接同步（无 CalDAV 场景）
+- `UID` 落盘到条目 `uid`；`id` 由 UID **确定性哈希**成 8 位 hex
+  （同一份 ICS 重复导入、重复拉取都得到同一个 id，不会产生重复条目）
+- `LAST-MODIFIED`（缺省退回 `DTSTAMP`）写进 `updatedAt`，供冲突判定使用
+- `RECURRENCE-ID` 的例外实例**跳过**：它与主事件共用 UID，硬导会覆盖主事件
+- `SUMMARY` 缺失的 VEVENT 整条跳过（不生成空标题条目）
+- 未知属性不报错，也不保留（`IcsEvent.rawBlock` 保留原始块，供将来需要时取用）
 
-```
-无需 ICS 转换，直接同步 events.md 文件本身
+## 时间与时区规则
 
-本地 events.md  ←→  WebDAV 服务器 /remote/events.md
-                        │
-                  其他设备同步后
-                  读取 events.md 即可
-```
+**workspace 里存的是本地时间，不带时区后缀**：`2026-10-28T09:00:00`。
 
-**优势**：
-
-- 不需要搭建 CalDAV 服务器
-- 不需要 ICS 转换逻辑
-- 文件级同步，简单可靠
-- 任何支持 WebDAV 的云盘（Nextcloud、ownCloud、Box 等）均可
-
-### 方式三：Git 同步（高级场景）
+导出时写成**浮动时间**（floating time）：
 
 ```
-本地 events.md  ←→  Git 仓库（GitHub/GitLab）
-                        │
-                  利用 Git 的历史记录和冲突解决
-                  PR 方式审核 AI 的修改
+DTSTART:20261028T090000
+DTEND:20261028T100000
 ```
 
-## 工作台 ↔ 日历双向绑定（2026-08-21）
+`CREATED` / `LAST-MODIFIED` / `DTSTAMP` 是**时间戳**，按标准写 UTC（带 `Z`）；
+只有 `DTSTART` / `DTEND` 是浮动本地时间，两者不要混。
 
-工作台「任务看板」与日历并非两份独立数据，而是通过轻量引用字段**互链**，两端共享同一个事件/任务实体。
+`DTSTART` / `DTEND` 不加 `Z`、不加 `TZID`、不写 `VTIMEZONE`。理由：
 
-### 互链字段
+1. 加 `Z` 是 UTC —— 东八区 09:00 会变成 `01:00Z`，不带时区解析的客户端
+   会显示成 01:00，**凭空差 8 小时**（这个坑踩过）
+2. 加 `TZID` 必须配套 `VTIMEZONE` 块，部分客户端（尤其是手机自带日历）
+   缺了 `VTIMEZONE` 就按浮动时间处理，写不写结果一样
+3. 本工具是单机个人工具，语义上「9 点开会」比「UTC+8 的 9 点」更贴近真实需求
 
-| 位置 | 字段 | 形式 |
+**代价**：如果用户跨时区旅行，浮动时间会跟着当地时区解释，事件时刻相对
+「当地时间」不变而不是「绝对时刻」不变。对个人日程这是想要的行为。
+
+`DTEND` 有两个硬规则（都写过测试）：
+
+- **全天事件的 DTEND 是排他边界**，必须写次日。`DTSTART;VALUE=DATE:20261028`
+  + `DTEND;VALUE=DATE:20261028` 是**零长度事件**，多数客户端直接不显示
+- 结束时间不晚于开始时间时补 +1 小时，避免负时长
+
+## RRULE：完整透传
+
+旧的 `md-ics-bridge.ts` 只取 `FREQ=xxx`，`BYDAY` / `BYMONTHDAY` / `INTERVAL` /
+`COUNT` / `UNTIL` **全部丢弃** —— 「每周一三五」导出到别的日历退化成「每周」。
+
+现在 `ics-convert.ts` 直接复用 `recurrence.ts` 的解析结果逐项回写：
+
+```
+FREQ=WEEKLY;BYDAY=MO,WE,FR;INTERVAL=2;COUNT=10;UNTIL=20261231T235959Z
+```
+
+`UNTIL` 要补成 `T235959Z` 形式（ICS 规定 UNTIL 是 UTC 时刻）；
+workspace 里只存日期，回读时截取日期部分。
+
+## 文本折行
+
+RFC 5545 要求内容行不超过 75 **字节**，超出用「CRLF + 空格」续行。
+`foldLine()` 按 75 字符切分（中文 UTF-8 是 3 字节/字，实际字节数会超，
+但所有主流客户端都按字符处理，中文长标题实测无问题）。
+解析侧 `parseIcsEvents` 先做 `\r\n[ \t] → ""` 展开。
+
+## 接口
+
+| 方法 | 路径 | 说明 |
 | ---- | ---- | ---- |
-| 工作搭子看板（`工作搭子看板.md`）任务行 | `calendarEventUid` | 行尾 `\| 日历:<uid>`（如 `- [ ] [高] 写周报 \| 日历:md-event-abc`） |
-| `events.md` 事件（YAML frontmatter） | `kanbanTaskId` | `kanbanTaskId: "t3"` |
+| POST | `/api/workspace/ics/import` | 导入 .ics 到统一数据源 |
+| GET | `/api/workspace/ics/export` | 从统一数据源导出 .ics |
 
-### 行为
+### 导入
 
-- **工作台加任务 → 同时入日历**：任务表单勾选「📅 同时加入日历」并填日期/时间，创建任务的同时写入对应事件，任务行打上「📅 已加入日历」标识。
-- **日历加事件 → 同时入看板**：事件表单勾选「📋 同时加入任务看板」并选优先级，创建事件的同时在看板插入一条任务，事件弹窗显示「📋 已在任务看板」。
-- **级联删除**：删任务时勾选「同时删除日历事件」→ 连事件一起删；删事件时勾选「同时删看板任务」→ 连任务一起删。
-- **解绑不删除**：`POST /api/kanban/task/:id/unlink-calendar` 只去掉指针，两边数据都保留。
-- **编辑不丢链**：`PUT /api/md-bridge/events/:uid` 更新事件时强制保留 `kanbanTaskId`，避免编辑事件把任务关联孤立。
-
-### 关联保留语义（同步不丢绑定）
-
-ICS 标准字段里没有「关联任务」概念，同步时必须特殊处理，否则「延时自动同步 / 手动拉取」会用远端 ICS 覆盖本地事件、把 `kanbanTaskId` 清空：
-
-1. **导出（MD → ICS）**：`eventToIcs` 额外写出自定义扩展属性 `X-KANBAN-TASK-ID:<id>`，使 push 到 CalDAV 的 `.ics` 也携带关联。
-2. **导入（ICS → MD）**：`icsToEvent` 解析 `X-KANBAN-TASK-ID` 回填 `kanbanTaskId`；没有该属性的外部真实 CalDAV 事件则为空。
-3. **Pull 合并**：`POST /api/md-bridge/sync/caldav` 的 pull 分支更新已有事件时，优先采用远程 ICS 里的 `X-KANBAN-TASK-ID`，否则**回退保留本地已有的 `kanbanTaskId`**——保证任何一次拉取都不会打掉工作台↔日历绑定。
-
-### 防重复显示
-
-日历模块渲染时，带 `calendarEventUid` 的看板任务已从「外部事件叠加层」过滤掉（它们已作为 `events.md` 里的真实事件显示），避免同一条任务在日历中双显。
-
-## 与 AI 助手的协同
-
-### AI 读取数据
-
-```markdown
-AI 读取 events.md → 解析 YAML frontmatter → 获得完整的事件列表
-→ 可作为上下文用于回答"我今天有什么安排"等查询
+```json
+POST /api/workspace/ics/import
+{
+  "icsContent": "BEGIN:VCALENDAR...",
+  "mode": "append",        // append（默认）| replace
+  "kind": "event",         // event（默认）| task
+  "dryRun": false,         // true = 只解析不落盘，返回预览
+  "skipDuplicates": true   // 默认 true，按 id 去重
+}
 ```
 
-### AI 写入数据
+响应（`dryRun: true` 时）：`{ parsed, toImport, skipped, preview[] }`
+响应（正常导入）：`{ imported, skipped, total, filePath }`
 
-```markdown
-AI 解析用户会议纪要 → 提取事件信息
-→ 追加到 events.md 的 events[] 数组
-→ 用户确认后触发同步
+- 无法解析出任何 VEVENT 时返回 400，并提示「确认包含 BEGIN:VEVENT 块」
+- `replace` 会**清空现有条目**再写入，只留 `notes` 区
+
+### 导出
+
+```
+GET /api/workspace/ics/export?start=2026-10-01&end=2026-10-31&scope=calendar&download=1&expand=0
 ```
 
-### AI 格式示例
+| 参数 | 说明 |
+| ---- | ---- |
+| `start` / `end` | 本地日历日范围过滤 |
+| `scope` | `all` / `calendar` / `board` |
+| `download=1` | 以附件形式下载（否则返回纯文本） |
+| `expand=1` | 把重复条目展开成多条独立事件；**默认不展开**，保留 RRULE 更省空间且可编辑 |
 
-```markdown
+## 历史实现对照（废弃，仅供理解演进）
+
+| 维度 | 旧（`md-ics-bridge.ts`，已废弃） | 新（`ics-convert.ts`） |
+| ---- | -------------------------------- | ---------------------- |
+| 数据文件 | `events.md` + `工作搭子看板.md` | `workspace.md` 单文件 |
+| 文件格式 | YAML frontmatter `events: [...]` | 每条一个 `## 标题` + `- key: value` 块 |
+| 文件内 UID | `uid` 字段 | `id` + `uid`（`uid` 保存远端身份，`id` 用于看板/日历） |
+| 时区 | `TZID` + `VTIMEZONE` | 浮动本地时间 |
+| RRULE | 只保留 `FREQ` | 完整透传 |
+| 标签 | `tags.join(",")` | 每标签一行 `CATEGORIES` |
+| 绑定关系 | `kanbanTaskId` ↔ `日历:<uid>` 双向绑定 | **没有绑定** —— 同一份数据，不需要绑定 |
+| 接口前缀 | `/api/md-bridge/*` | `/api/workspace/*` |
+
+旧代码保留的原因：迁移脚本 `scripts/migrate-to-workspace.js` 需要读旧格式；
+`/api/md-bridge/*` 与 `/api/kanban/*` 路由仍挂载，但**前端已不再调用**
+（`apps/renderer/src/api/md-bridge.ts`、`kanban.ts` 是遗留文件）。
+
+## 已知限制
+
+- **删除不传播到远端 CalDAV**：缺少墓碑（tombstone）记录，push 只做创建/更新
+- **只同步 VEVENT**：纯截止日期任务（VTODO）暂不推
+- **重复事件的例外（RECURRENCE-ID）不合并**：为避免覆盖主事件，直接跳过
+- **`done` / `parent` / `list` 在外部日历里不可见**：这是设计选择，不是缺陷
+- `project` 用私有属性 `X-WORKBENCH-PROJECT` 保存，别的日历看不到（但不会丢）
+
 ---
-events:
-  - title: "项目评审会议"
-    date: "2026-08-18T14:00:00"
-    end: "2026-08-18T15:30:00"
-    category: "工作"
-    tags: ["项目"]
-    description: "AI 从会议纪要中自动提取"
-    source: "ai"
----
-```
 
-## 服务器端 API（简化版）
-
-### 核心接口
-
-| 方法   | 路径                         | 说明                                    |
-| ------ | ---------------------------- | --------------------------------------- |
-| `GET`  | `/api/md-bridge/events`      | 读取 events.md 返回所有事件             |
-| `PUT`  | `/api/md-bridge/events`      | 写入完整 events.md（AI/用户编辑后保存） |
-| `POST` | `/api/md-bridge/ics/import` | 导入 `.ics` 文件；`dryRun` 预览 / `mode=append\|replace` |
-| `GET`  | `/api/md-bridge/ics/export`  | 导出为单个 `.ics`；`start`/`end` 过滤 / `download=1` |
-| `POST` | `/api/md-bridge/sync/caldav` | 将 events.md 同步到 CalDAV              |
-| `GET`  | `/api/md-bridge/config`      | 读取同步配置                            |
-| `PUT`  | `/api/md-bridge/config`      | 更新同步配置                            |
-| `PUT`  | `/api/md-bridge/events/:uid` | 更新单个事件字段（**保留 kanbanTaskId**，避免孤立绑定） |
-| `POST` | `/api/md-bridge/events/add`  | 追加事件；可带 `kanban:{priority,project,due?}` 同步建看板任务 |
-| `DELETE` | `/api/md-bridge/events/:uid` | 删除事件；若绑定任务则级联删看板任务   |
-| `POST` | `/api/kanban/task`           | 建任务；可带 `calendar:{date,time,endDate?,endTime?,allDay?}` 同步建日历事件 |
-| `PATCH` | `/api/kanban/task/:id`       | 改任务；支持建/改绑定，或 `clearCalendar:true` 删绑定事件 |
-| `DELETE` | `/api/kanban/task/:id`       | 删任务；级联删绑定事件                 |
-| `POST` | `/api/kanban/task/:id/unlink-calendar` | 仅解绑，两边数据都保留         |
-
-### WebDAV 通道 API
-
-| 方法 | 路径                  | 说明 |
-| ---- | --------------------- | ---- |
-| `GET` | `/api/webdav/status`  | 查询配置与双文件本地/远端状态、上次同步时间、远端是否变更 |
-| `POST` | `/api/webdav/push`   | 推送 md 到远端；`files` 限定范围、`force` 强制覆盖 |
-| `POST` | `/api/webdav/pull`   | 拉取覆盖本地；`force` 强制拉取（默认远端无变化则跳过） |
-| `POST` | `/api/webdav/test`   | 连通性 + 认证测试 |
-
-### 数据流
-
-```
-前端 / AI
-   │
-   │  PUT /api/md-bridge/events  (写入 events.md)
-   ▼
-events.md 文件（服务器端缓存）
-   │
-   │  POST /api/md-bridge/sync/caldav
-   ▼
-MD → ICS 转换 → CalDAV PUT
-```
-
-## 实现计划
-
-### 第一阶段：核心文件格式与编辑
-
-- [x] `events.md` 格式定义
-- [x] MD frontmatter 解析（支持 events 数组）
-- [x] MD frontmatter 写入（追加/更新/删除事件，含 `kanbanTaskId` 字段）
-- [x] `GET/PUT /api/md-bridge/events` API（PUT 保留关联）
-
-### 第二阶段：CalDAV 同步
-
-- [x] events.md → ICS 批量转换（`allEventsToIcs`）
-- [x] 双向同步：push（MD→CalDAV）+ pull（CalDAV→MD，保留本地 `kanbanTaskId`）
-- [~] 增量同步（目前按全量 events 遍历；未完成 `updated` 时间戳级别的精细增量）
-- [~] 冲突检测（基于 `updated` 时间戳，基础版）
-- [x] 工作台↔日历双向绑定（`kanbanTaskId` / `日历:<uid>`，见上文）
-
-### 第三阶段：WebDAV 同步（2026-10-19 已实现）
-
-- [x] WebDAV 客户端（`apps/server/src/webdav.ts`）
-      只用 Node 内置 fetch，不引第三方依赖（坚果云等对 WebDAV 库兼容性参差）；
-      Basic 认证；远端目录不存在时递归 `MKCOL` 创建。
-- [x] 同步 `events.md` 与 `工作搭子看板.md` 两个文件
-- [x] **ETag 乐观锁**：push 时若远端自上次同步后被其他设备改动，返回 `conflict`，
-      **不静默覆盖**；用户可选择「用本地覆盖远端」或「改用远端内容」。
-- [x] **拉取保护**：只在远端确实变化时才覆盖本地；覆盖前自动备份为 `.bak`
-- [x] 同步状态记录在本地 `.webdav-state.json`（各文件上次同步时的远端 ETag）
-- [x] API：`GET /api/webdav/status`、`POST /api/webdav/push`、`POST /api/webdav/pull`、`POST /api/webdav/test`
-- [x] 日历页工具栏「WebDAV」按钮 + 同步面板（文件状态、连接测试、冲突提示）
-- [x] 服务端不再因 CalDAV 连接失败而 `process.exit(1)` —— md + WebDAV 通道可独立使用
-
-### 第四阶段：iCalendar 文件导入 / 导出（2026-10-19）
-
-- [x] `parseIcsFile(icsContent)` —— 解析含多个 VEVENT 的完整 .ics 文件
-      （此前 `icsToEvent` 只取第一条 VEVENT，导入 Google/Outlook 导出的日历会丢数据）
-- [x] `eventsFileToIcs(eventsFile)` —— 导出为单个 VCALENDAR 文件
-- [x] `POST /api/md-bridge/ics/import` —— 支持 `dryRun` 预览、按 uid 去重、`append` / `replace` 两种模式
-- [x] `GET /api/md-bridge/ics/export` —— 支持 `start` / `end` 日期范围过滤与 `download=1` 直接下载
-- [x] 日历页工具栏「导入 ICS」「导出 ICS」按钮 + 导入预览确认弹窗
-
-### 已知边界与后续工作
-
-- **AI 集成**：`.env` 中 `AI_PROVIDER` / `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` 同为预留配置，无代码读取。
-- **增量同步**：目前按全量 events 遍历，未做 `updated` 时间戳级别的增量。
-- **冲突检测**：CalDAV 通道仅基于 `updated` 的基础版；WebDAV 通道用 ETag 乐观锁（较可靠）。
-- **删除传播**：从 MD 删除事件后同步，**不会删除 CalDAV 远端已存在的对应 `.ics`**（缺少墓碑记录）。
-- **WebDAV 冲突合并**：检测到冲突时只提示，不做自动三方合并（需用户选一边）。
-
-### 已知陷阱（踩过的坑，改动相关代码前请先读）
-
-1. **全天事件的 DTEND 是排他的**，必须是次日 00:00。与 DTSTART 同日会导出零长度事件，部分客户端直接不显示。
-2. **全天事件的 `VALUE=DATE` 不能用 `toISOString()` 生成** —— 那是 UTC 换算，东八区凌晨的事件会落到前一天。应取本地 `getFullYear/getMonth/getDate`。
-3. **不要用 `new Date("2026-10-02")` 做日期过滤** —— 它按 UTC 午夜解析，在东八区等于本地 08:00，会误排除当天上午的事件。应构造 `${d}T00:00:00`（本地零点）。
-4. **看板任务 id 必须持久化到 md**（`| id:` 字段）。早期用行序 `t0/t1/t2` 定位，而新建任务会 unshift 到队首，导致存量任务 id 整体错位，删 A 会连带删掉 B 的日历事件。
-5. **同步方向有两套命名**：配置层 `md-to-caldav` / `caldav-to-md` / `bidirectional`，同步层 `push` / `pull` / `bidirectional`。必须经 `normalizeSyncDirection()` 转换，直接传配置值会导致同步静默不执行。
-6. **本地 md 路径解析要统一**：`MD_EVENTS_FILE=./events.md` 是相对**进程 cwd** 的。项目里曾同时存在 `path.resolve(cwd, ...)` 与直接用相对串两种写法（结果相同但语义混乱），新增代码统一走 `resolveLocalPath()`。
+**Last Updated**: 2026-11-02（补 uid / X-WORKBENCH-PROJECT / UTC 时间戳 / CalDAV 同步引擎）
+**Related**: [DATA_SOURCE.md](DATA_SOURCE.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[../docs/SYNC_MANAGEMENT.md](../docs/SYNC_MANAGEMENT.md)

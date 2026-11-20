@@ -14,6 +14,7 @@ import {
   loadAIConfig,
   isAIConfigured,
 } from "../nlp/ai-parser.js";
+import { asyncHandler } from "../http.js";
 
 export const nlpRouter = express.Router();
 
@@ -47,9 +48,9 @@ nlpRouter.get("/status", (_req, res) => {
  *   - now?: string  ISO 基准时间（便于测试与"相对某时刻"的场景）
  *
  * 返回事件草稿，**不写文件**。前端展示确认后，再调
- * POST /api/md-bridge/events/add 落盘。
+ * POST /api/workspace/items 落盘。
  */
-nlpRouter.post("/parse", async (req, res) => {
+nlpRouter.post("/parse", asyncHandler(async (req, res) => {
   try {
     const { text, forceAI, now } = req.body || {};
     if (!text || typeof text !== "string" || !text.trim()) {
@@ -82,7 +83,7 @@ nlpRouter.post("/parse", async (req, res) => {
       error: (error as Error).message,
     });
   }
-});
+}));
 
 /**
  * POST /api/nlp/transcribe
@@ -91,7 +92,7 @@ nlpRouter.post("/parse", async (req, res) => {
  * 依赖 AI 的 Whisper 能力（OpenAI 兼容接口的 /audio/transcriptions）。
  * 未配置 AI 时返回 400，前端应回退到浏览器内置的 Web Speech API。
  */
-nlpRouter.post("/transcribe", upload.single("audio"), async (req, res) => {
+nlpRouter.post("/transcribe", upload.single("audio"), asyncHandler(async (req, res) => {
   try {
     const cfg = loadAIConfig();
     if (!isAIConfigured(cfg)) {
@@ -140,4 +141,4 @@ nlpRouter.post("/transcribe", upload.single("audio"), async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
-});
+}));

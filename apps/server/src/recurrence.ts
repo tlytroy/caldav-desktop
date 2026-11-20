@@ -24,9 +24,19 @@
  *
  * ## 展开算法
  *
- * 展开按「本地日历日」推进，而不是按秒数累加 —— 这是跨月/跨年正确的关键。
- * 例如「每月31号」在只有30天的月份要跳到下个月，不能用 +30天 硬算。
+ * v0.3 起不再自己写日期推进，改用 `rrule`（RFC 5545 的成熟实现）展开。
+ * 自己算「每月31号遇到2月」「2月29日」「INTERVAL + BYDAY」这些边界太容易错，
+ * 这类轮子没必要重复造。我们只做一层适配：把「本地日期时间」映射到 UTC
+ * 伪时间轴交给 rrule，再把结果按 UTC 读回成本地日历日，避免夏令时/时区漂移。
  */
+
+// `rrule@2` 是 CJS 包（webpack UMD 产物），ESM 的具名导入在 Node 里会报
+// "does not provide an export named 'RRule'"（vitest 走转换不会暴露这个问题，
+// 只有跑 dist/ 才会炸）。用默认导入再解构。
+import rrulePkg from "rrule";
+import type { Options } from "rrule";
+
+const { RRule } = rrulePkg;
 
 export type RecurrenceFreq = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY";
 
@@ -183,20 +193,10 @@ function ymd(d: Date): string {
   ).padStart(2, "0")}`;
 }
 
-/** JS getDay(0=周日) → RRULE 编号(1=周一) */
-function jsDayToRRule(d: Date): number {
-  return d.getDay() === 0 ? 7 : d.getDay();
-}
-
-/** 两个日期相差的整天数（按日历日，不是秒） */
-function diffDays(a: Date, b: Date): number {
-  const da = new Date(a.getFullYear(), a.getMonth(), a.getDate());
-  const db = new Date(b.getFullYear(), b.getMonth(), b.getDate());
-  return Math.round((db.getTime() - da.getTime()) / 86400000);
-}
-
 /**
  * 展开重复规则为具体发生日期。
+ *
+ * 交给 rrule 计算，本函数只负责本地日期 ↔ UTC 伪日期轴的适配。
  *
  * @param startIso 首次发生的时间（ISO 本地时间串，如 "2026-10-28T09:00:00"）
  * @param rule RRULE 规则
@@ -212,129 +212,86 @@ export function expandRecurrenceDates(
   rangeEnd: string,
   maxCount = 400,
 ): string[] {
-  const out: string[] = [];
   const start = new Date(startIso);
-  if (isNaN(start.getTime())) return out;
+  if (isNaN(start.getTime())) return [];
 
   const rs = new Date(`${rangeStart}T00:00:00`);
-  const re = new Date(`${rangeEnd}T00:00:00`);
-  if (isNaN(rs.getTime()) || isNaN(re.getTime())) return out;
-
-  const interval = Math.max(1, rule.interval ?? 1);
-  const untilDate = rule.until ? new Date(`${rule.until}T00:00:00`) : null;
-  const maxOccurrences = rule.count ?? Infinity;
-
-  let emitted = 0;
-  // 搜索上限：最多往后找 5 年，避免 YEARLY + 无 UNTIL 时死循环
-  const hardLimit = new Date(
-    start.getFullYear() + 5,
-    start.getMonth(),
-    start.getDate(),
-  );
-
-  const cursor = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate(),
-  );
-  let guard = 0;
-
-  while (cursor <= hardLimit && guard < 20000) {
-    guard++;
-
-    // ---- 判断当前 cursor 是否是一次发生 ----
-    let matches = false;
-
-    if (rule.freq === "DAILY") {
-      matches = diffDays(start, cursor) % interval === 0;
-    } else if (rule.freq === "WEEKLY") {
-      const weekDiff = Math.floor(diffDays(startOfWeek(start), startOfWeek(cursor)) / 7);
-      if (weekDiff % interval === 0) {
-        if (rule.byDay && rule.byDay.length > 0) {
-          matches = rule.byDay.includes(jsDayToRRule(cursor));
-        } else {
-          // 无 BYDAY：与首次同星期几
-          matches = jsDayToRRule(cursor) === jsDayToRRule(start);
-        }
-      }
-    } else if (rule.freq === "MONTHLY") {
-      const monthDiff =
-        (cursor.getFullYear() - start.getFullYear()) * 12 +
-        (cursor.getMonth() - start.getMonth());
-      if (monthDiff % interval === 0) {
-        if (rule.byMonthDay && rule.byMonthDay.length > 0) {
-          matches = rule.byMonthDay.includes(cursor.getDate());
-        } else {
-          matches = cursor.getDate() === start.getDate();
-        }
-      }
-    } else if (rule.freq === "YEARLY") {
-      const yearDiff = cursor.getFullYear() - start.getFullYear();
-      if (yearDiff % interval === 0) {
-        // 2月29日：只有闰年才有 2/29，非闰年跳过（不自动顺延到3/1）
-        matches =
-          cursor.getMonth() === start.getMonth() &&
-          cursor.getDate() === start.getDate();
-      }
-    }
-
-    if (matches) {
-      // 首次发生日之前不产生实例
-      if (cursor >= new Date(start.getFullYear(), start.getMonth(), start.getDate())) {
-        // UNTIL 截断
-        if (untilDate && cursor > untilDate) break;
-        // COUNT 截断
-        if (emitted >= maxOccurrences) break;
-
-        emitted++;
-        const d = ymd(cursor);
-        // 区间过滤
-        if (cursor >= rs && cursor <= re) {
-          out.push(d);
-          if (out.length >= maxCount) break;
-        }
-      }
-    }
-
-    // ---- 推进游标 ----
-    if (rule.freq === "DAILY") {
-      cursor.setDate(cursor.getDate() + 1);
-    } else if (rule.freq === "WEEKLY") {
-      // ⚠️ 必须逐日推进（+1 天），不能 +7 天。
-      // +7 天只会检查到"每周的第一天"，同一周内的周三、周五会被整个跳过
-      // —— 「每周一三五」就只会出现周一。
-      // 「哪一周」由上面的 weekDiff % interval 判断。
-      cursor.setDate(cursor.getDate() + 1);
-    } else if (rule.freq === "MONTHLY") {
-      // 关键：先把日期置为 1 再推进月份，否则 1/31 → setMonth(+1) 会溢出成 3/3，
-      // 月份直接错掉（2 月被跳过，还以为溢出到了 3 月）。
-      cursor.setDate(1);
-      cursor.setMonth(cursor.getMonth() + 1);
-      // 恢复目标日；若该月没有这一天（如 31 号遇到 2 月），保持 1 号 ——
-      // 匹配时会因「日 != 起始日」而自然跳过该月（RFC 5545 语义）。
-      cursor.setDate(Math.min(start.getDate(), daysInMonth(cursor)));
-    } else if (rule.freq === "YEARLY") {
-      // 同理：2/29 → 2029 年不存在，setFullYear 会溢出到 3/1
-      cursor.setDate(1);
-      cursor.setFullYear(cursor.getFullYear() + 1);
-      cursor.setMonth(start.getMonth());
-      cursor.setDate(Math.min(start.getDate(), daysInMonth(cursor)));
-    }
+  const re = new Date(`${rangeEnd}T23:59:59`);
+  if (isNaN(rs.getTime()) || isNaN(re.getTime())) {
+    return [];
   }
 
-  return out;
+  const options: Partial<Options> = {
+    freq: FREQ_TO_RRULE[rule.freq],
+    dtstart: toPseudoUtc(start),
+    interval: Math.max(1, rule.interval ?? 1),
+  };
+  if (rule.byDay && rule.byDay.length > 0) {
+    options.byweekday = rule.byDay.map((d) => RRULE_WEEKDAYS[d - 1]);
+  }
+  if (rule.byMonthDay && rule.byMonthDay.length > 0) {
+    options.bymonthday = rule.byMonthDay;
+  }
+  if (rule.count) options.count = rule.count;
+  if (rule.until) {
+    const until = new Date(`${rule.until}T23:59:59`);
+    if (!isNaN(until.getTime())) options.until = toPseudoUtc(until);
+  }
+
+  let dates: Date[];
+  try {
+    dates = new RRule(options as Options).between(
+      toPseudoUtc(rs),
+      toPseudoUtc(re),
+      true,
+    );
+  } catch {
+    // 规则本身非法（例如 BYMONTHDAY=0）：当作不展开，不要拖垮日历渲染
+    return [];
+  }
+
+  return dates.slice(0, maxCount).map(pseudoUtcYmd);
 }
 
-/** 某月的天数（month 为 0-based） */
-function daysInMonth(d: Date): number {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+/** 本地日期时间 → UTC 伪时间（只借用 UTC 的算术，不改变墙上时间） */
+function toPseudoUtc(d: Date): Date {
+  return new Date(
+    Date.UTC(
+      d.getFullYear(),
+      d.getMonth(),
+      d.getDate(),
+      d.getHours(),
+      d.getMinutes(),
+      d.getSeconds(),
+    ),
+  );
 }
 
-/** 周一为一周之始 */
-function startOfWeek(d: Date): Date {
-  const day = d.getDay() === 0 ? 7 : d.getDay();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - (day - 1));
+/** UTC 伪时间 → 本地日历日 YYYY-MM-DD */
+function pseudoUtcYmd(d: Date): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
+
+const FREQ_TO_RRULE: Record<RecurrenceFreq, number> = {
+  DAILY: RRule.DAILY,
+  WEEKLY: RRule.WEEKLY,
+  MONTHLY: RRule.MONTHLY,
+  YEARLY: RRule.YEARLY,
+};
+
+/** 与 indexToWeekday 对齐：1=周一 … 7=周日 */
+const RRULE_WEEKDAYS = [
+  RRule.MO,
+  RRule.TU,
+  RRule.WE,
+  RRule.TH,
+  RRule.FR,
+  RRule.SA,
+  RRule.SU,
+];
 
 /**
  * 把带重复规则的事件展开成多个实例（用于日历渲染）。

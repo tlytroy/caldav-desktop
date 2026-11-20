@@ -2,22 +2,20 @@
  * WebDAV 同步 API 客户端
  *
  * WebDAV 通道与 CalDAV 通道的分工：
- *   - CalDAV：events.md → ICS → CalDAV 服务器（跨日历软件互通）
+ *   - CalDAV：workspace.md → ICS → CalDAV 服务器（跨日历软件互通）
  *   - WebDAV：md 文件本身 ↔ WebDAV 服务器（**无需 ICS 转换**）
  *
  * 适用场景：用户没有 CalDAV 服务器，但有任意支持 WebDAV 的云盘
  * （Nextcloud / ownCloud / 坚果云 / Box）。md 仍是唯一事实源。
  */
 
-import axios from "axios";
+import { createApiClient } from "./client";
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  timeout: 60000, // WebDAV 同步可能较慢，比普通 API 长
-});
+const api = createApiClient(60000);
 
 export interface WebDAVFileStatus {
-  key: "events" | "kanban";
+  /** 统一数据源只有一个文件 */
+  key: "workspace";
   filename: string;
   local: { path: string; exists: boolean; size: number; mtime?: number };
   remote: {
@@ -40,6 +38,17 @@ export interface WebDAVStatus {
   hasCredentials?: boolean;
   files: WebDAVFileStatus[];
   message?: string;
+}
+
+/** 合并报告（条目级） */
+export interface WebDAVMergeReport {
+  localOnly: number;
+  remoteOnly: number;
+  fromRemote: number;
+  fromLocal: number;
+  conflicts: Array<{ id: string; title: string }>;
+  invalid: number;
+  total: number;
 }
 
 export interface WebDAVSyncResult {
@@ -79,7 +88,7 @@ export async function testWebDAVConnection(): Promise<{
  * @param opts.force 忽略 ETag 检查强制覆盖（远端被他人改动时）
  */
 export async function pushToWebDAV(opts?: {
-  files?: ("events" | "kanban")[];
+  files?: "workspace"[];
   force?: boolean;
 }): Promise<{ success: boolean; results: WebDAVSyncResult[] }> {
   const { data } = await api.post("/api/webdav/push", {
@@ -94,12 +103,29 @@ export async function pushToWebDAV(opts?: {
  * 远端无变化时默认跳过；覆盖前会自动备份为 .bak。
  */
 export async function pullFromWebDAV(opts?: {
-  files?: ("events" | "kanban")[];
+  files?: "workspace"[];
   force?: boolean;
 }): Promise<{ success: boolean; results: WebDAVSyncResult[] }> {
   const { data } = await api.post("/api/webdav/pull", {
     files: opts?.files,
     force: opts?.force,
   });
+  return data;
+}
+
+/**
+ * 合并本地与远端（冲突时的第三个选项）。
+ *
+ * 按条目 id 取并集：只有一边有的都保留；两边都有的用 `updatedAt` 较新的一版；
+ * 时间相同但内容不同时保留本地并在 `conflicts` 里报告。
+ * 合并结果会同时写回本地与远端，本地覆盖前备份为 `.bak`。
+ */
+export async function mergeWebDAV(): Promise<{
+  success: boolean;
+  filename: string;
+  merged: WebDAVMergeReport;
+  backupPath?: string;
+}> {
+  const { data } = await api.post("/api/webdav/merge");
   return data;
 }

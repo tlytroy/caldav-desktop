@@ -16,6 +16,13 @@
       "description": "Stable identifier. Never reuse. Format: 8 lowercase hex chars.",
       "pattern": "^[0-9a-f]{8}$"
     },
+    "uid": {
+      "type": "string",
+      "description": "UID in the external calendar (CalDAV / ICS). Preserved across sync so editing locally does not create a duplicate on the server. Empty on pure-local entries (id is used as UID then).",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^[^\\r\\n]+$"
+    },
     "kind": {
       "type": "string",
       "description": "Entry type. 'task' = something to finish; 'event' = something to attend. A task with a start time shows up in BOTH the board and the calendar.",
@@ -44,6 +51,11 @@
       "type": "string",
       "description": "Deadline date for tasks (YYYY-MM-DD). Optional.",
       "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "remind": {
+      "type": "string",
+      "description": "Reminder time in LOCAL time, no timezone suffix (YYYY-MM-DDTHH:mm:ss). Empty = no reminder. Stored as an absolute timestamp so all-day entries and due-only tasks have no hidden offset rules.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(:\\d{2})?$"
     },
     "allDay": {
       "type": "boolean",

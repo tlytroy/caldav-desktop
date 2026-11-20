@@ -11,12 +11,12 @@
 import express from "express";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
 export const pluginRouter = express.Router();
 
-/** ESM 环境下没有 __dirname */
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
+/** 兼容两种运行时：ESM（tsx/开发）没有 __dirname，CJS 打包后有。 */
+const currentDir =
+  typeof __dirname === "string" && __dirname ? __dirname : process.cwd();
 
 /**
  * 插件目录：`apps/renderer/plugins/`

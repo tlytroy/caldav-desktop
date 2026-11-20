@@ -78,7 +78,7 @@ describe("降级响应形状", () => {
     const base = `http://127.0.0.1:${(server.address() as any).port}`;
 
     const res = await fetch(`${base}/t`);
-    const j = await res.json();
+    const j: any = await res.json();
 
     expect(res.status).toBe(200);
     expect(j.degraded).toBe(true);

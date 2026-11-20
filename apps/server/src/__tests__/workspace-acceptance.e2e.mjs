@@ -9,8 +9,15 @@
  *   node src/__tests__/workspace-acceptance.e2e.mjs
  */
 
-const BASE = process.env.VERIFY_BASE_URL || "http://127.0.0.1:3001";
+const BASE = (process.env.VERIFY_BASE_URL || "http://127.0.0.1:3001").replace(/\/$/, "");
 const API = `${BASE}/api/workspace`;
+const TOKEN = (process.env.VERIFY_TOKEN || process.env.API_TOKEN || "").trim();
+if (!TOKEN) {
+  console.error("缺少 VERIFY_TOKEN / API_TOKEN：v0.3 的 /api/* 需要 Bearer 认证。");
+  console.error("推荐用 `bash scripts/run-e2e.sh` 一键起隔离服务并自动带 token。");
+  process.exit(2);
+}
+const AUTH = { Authorization: `Bearer ${TOKEN}` };
 
 let pass = 0;
 let fail = 0;
@@ -36,7 +43,7 @@ function section(title) {
 async function req(method, path, body) {
   const res = await fetch(`${API}${path}`, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { ...AUTH, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();

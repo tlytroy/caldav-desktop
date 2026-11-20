@@ -1,6 +1,6 @@
 {
   "name": "caldav-desktop",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "private": true,
   "description": "A cross-platform desktop calendar application with full CalDAV support and modern UI design",
   "scripts": {

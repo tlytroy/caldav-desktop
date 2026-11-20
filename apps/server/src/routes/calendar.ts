@@ -8,6 +8,7 @@ import {
   initializeClient,
   currentConfig,
 } from "../caldav.js";
+import { asyncHandler } from "../http.js";
 export const calendarRouter = express.Router();
 
 /**
@@ -57,7 +58,7 @@ calendarRouter.get("/calendars", async (_, res) => {
   }
 });
 
-calendarRouter.get("/events", async (req, res) => {
+calendarRouter.get("/events", asyncHandler(async (req, res) => {
   try {
     const { start, end, calendarUrl } = req.query;
     if (!start || !end) {
@@ -430,10 +431,10 @@ calendarRouter.get("/events", async (req, res) => {
     }
     res.status(500).json({ error: (error as Error).message });
   }
-});
+}));
 
 // 创建事件端点
-calendarRouter.post("/events", async (req, res) => {
+calendarRouter.post("/events", asyncHandler(async (req, res) => {
   try {
     const {
       title,
@@ -498,10 +499,10 @@ calendarRouter.post("/events", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
-});
+}));
 
 // 更新事件端点
-calendarRouter.put("/events/:uid", async (req, res) => {
+calendarRouter.put("/events/:uid", asyncHandler(async (req, res) => {
   try {
     const { uid } = req.params;
     const {
@@ -576,10 +577,10 @@ calendarRouter.put("/events/:uid", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
-});
+}));
 
 // 删除事件端点
-calendarRouter.delete("/events/:uid", async (req, res) => {
+calendarRouter.delete("/events/:uid", asyncHandler(async (req, res) => {
   try {
     const { uid } = req.params;
     const { calendarUrl } = req.query;
@@ -711,7 +712,7 @@ calendarRouter.delete("/events/:uid", async (req, res) => {
         "An unexpected error occurred while deleting the event. Please try again.",
     });
   }
-});
+}));
 
 // ===== 共享工具函数 =====
 
@@ -851,7 +852,7 @@ calendarRouter.get("/config", async (_, res) => {
   }
 });
 
-calendarRouter.post("/config/test", async (req, res) => {
+calendarRouter.post("/config/test", asyncHandler(async (req, res) => {
   try {
     const { url, username, password } = req.body;
 
@@ -866,9 +867,9 @@ calendarRouter.post("/config/test", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
-});
+}));
 
-calendarRouter.post("/config", async (req, res) => {
+calendarRouter.post("/config", asyncHandler(async (req, res) => {
   try {
     const { url, username, password } = req.body;
 
@@ -899,4 +900,4 @@ calendarRouter.post("/config", async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
   }
-});
+}));

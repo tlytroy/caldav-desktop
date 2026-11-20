@@ -12,6 +12,20 @@
     "!*.map",
     "!package.json.orig"
   ],
+  "extraResources": [
+    {
+      "from": "dist-server",
+      "to": "server"
+    },
+    {
+      "from": "../renderer/dist",
+      "to": "renderer"
+    },
+    {
+      "from": "../renderer/plugins",
+      "to": "plugins"
+    }
+  ],
   "asarUnpack": ["node_modules/ms/**/*"],
   "npmRebuild": false,
   "win": {

@@ -1,21 +1,29 @@
 /**
  * 全功能验收测试（端到端）
  *
- * 需要**真实启动的服务**：
- *   cd apps/server && node dist/index.js
- * 然后：
- *   node src/__tests__/acceptance.e2e.mjs
+ * 由 `scripts/run-e2e.sh` 启动一个隔离的临时服务后调用，也可以手动：
+ *   cd apps/server && node dist/index.js   # 自行设置 API_TOKEN / WORKSPACE_FILE
+ *   VERIFY_TOKEN=<token> node src/__tests__/acceptance.e2e.mjs
+ *
+ * v0.3 起所有 /api/* 都需要 Bearer token（P5 认证），所以必须带
+ * `VERIFY_TOKEN`（或 `API_TOKEN`），否则会整片 401。
+ * `VERIFY_BASE_URL` 可覆盖默认地址，`VERIFY_TOKEN` 必须与该服务的 token 一致。
  *
  * 覆盖从「用户输入一句话」到「数据落盘」的完整链路，
  * 以及 CalDAV 不可用时的降级行为。
+ *
+ * 注意：v0.3 起旧 `/api/md-bridge/*` 与 `/api/kanban/*` 已退役，
+ * 这里只打 `/api/workspace/*` 统一数据源。
  */
 
-/**
- * 全功能验收测试 —— 真实 HTTP 打所有 API
- * 用真实启动的服务跑，覆盖从"用户输入一句话"到"数据落盘"的完整链路。
- */
-
-const B = "http://127.0.0.1:3001";
+const B = (process.env.VERIFY_BASE_URL || "http://127.0.0.1:3001").replace(/\/$/, "");
+const TOKEN = (process.env.VERIFY_TOKEN || process.env.API_TOKEN || "").trim();
+if (!TOKEN) {
+  console.error("缺少 VERIFY_TOKEN / API_TOKEN：v0.3 的 /api/* 需要 Bearer 认证。");
+  console.error("推荐用 `bash scripts/run-e2e.sh` 一键起隔离服务并自动带 token。");
+  process.exit(2);
+}
+const AUTH = { Authorization: `Bearer ${TOKEN}` };
 let pass = 0, fail = 0, skip = 0;
 const results = [];
 
@@ -32,43 +40,24 @@ function skipTest(name, reason) {
 }
 function section(t) { console.log(`\n${"═".repeat(58)}\n${t}\n${"═".repeat(58)}`); }
 
-const get = async (p) => {
-  const r = await fetch(B + p);
+const parse = async (r) => {
+  // 调用方传进来的是 fetch 的 Promise，这里先等它 resolve 成 Response
+  r = await r;
   const t = await r.text();
   try { return { status: r.status, json: JSON.parse(t) }; } catch { return { status: r.status, json: null, text: t }; }
 };
-const post = async (p, body) => {
-  const r = await fetch(B + p, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
-  const t = await r.text();
-  try { return { status: r.status, json: JSON.parse(t) }; } catch { return { status: r.status, json: null, text: t }; }
-};
-const del = async (p) => {
-  const r = await fetch(B + p, { method: "DELETE" });
-  const t = await r.text();
-  try { return { status: r.status, json: JSON.parse(t) }; } catch { return { status: r.status, json: null }; }
-};
-const put = async (p, body) => {
-  const r = await fetch(B + p, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
-  const t = await r.text();
-  try { return { status: r.status, json: JSON.parse(t) }; } catch { return { status: r.status, json: null }; }
-};
-const patch = async (p, body) => {
-  const r = await fetch(B + p, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
-  const t = await r.text();
-  try { return { status: r.status, json: JSON.parse(t) }; } catch { return { status: r.status, json: null }; }
-};
+const get = (p) => parse(fetch(B + p, { headers: AUTH }));
+const post = (p, body) => parse(fetch(B + p, {
+  method: "POST",
+  headers: { ...AUTH, "Content-Type": "application/json" },
+  body: JSON.stringify(body ?? {}),
+}));
+const del = (p) => parse(fetch(B + p, { method: "DELETE", headers: AUTH }));
+const put = (p, body) => parse(fetch(B + p, {
+  method: "PUT",
+  headers: { ...AUTH, "Content-Type": "application/json" },
+  body: JSON.stringify(body ?? {}),
+}));
 
 // ═══════════════ 1. 服务健康 ═══════════════
 section("1. 服务启动与基础可用");
@@ -76,23 +65,54 @@ section("1. 服务启动与基础可用");
   const s = await get("/api/nlp/status");
   check("服务已启动（/api/nlp/status 200）", s.status === 200);
   check("本地解析器可用", s.json?.localParser === true, s.json);
-  const e = await get("/api/md-bridge/events");
-  check("events.md 可读", e.status === 200 && Array.isArray(e.json?.events), e.json);
-  const k = await get("/api/kanban");
-  check("看板文件可读", k.status === 200 && Array.isArray(k.json?.todos), k.json);
+
+  const w = await get("/api/workspace/items");
+  check("workspace.md 可读", w.status === 200 && Array.isArray(w.json?.items), w.json);
+  check("返回统一数据源路径", typeof w.json?.filePath === "string" && w.json.filePath.endsWith(".md"), w.json?.filePath);
+
+  const info = await get("/api/workspace/info");
+  check("数据源信息可读", info.status === 200 && info.json?.success === true, info.json);
+  check("**只读状态可见**", typeof info.json?.readOnly === "boolean", info.json);
+  check("**存储安全状态可见**", typeof info.json?.storageSafe === "boolean", info.json);
 }
 
 // ═══════════════ 2. 自然语言解析 ═══════════════
 section("2. 自然语言解析（本地规则，不依赖网络）");
+// 期望值必须**跟着今天走** —— 以前这里写死成 2026-10-26 的「明天」，
+// 换一天跑就全红，那不是功能坏了，是断言过期了。
+const ymd = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const dayOffset = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return d;
+};
+const at = (d, hhmmss) => `${ymd(d)}T${hhmmss}`;
+const nextWeekWednesday = () => {
+  const now = new Date();
+  const dow = now.getDay(); // 0=周日
+  const toNextMonday = ((8 - dow) % 7) || 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + toNextMonday);
+  const wed = new Date(monday);
+  wed.setDate(monday.getDate() + 2);
+  return wed;
+};
+const nextMarch5 = () => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let year = now.getFullYear();
+  if (new Date(year, 2, 5).getTime() < today.getTime()) year += 1;
+  return `${year}-03-05`;
+};
 const cases = [
-  ["明天下午3点和老王开项目评审会", "2026-10-27T15:00:00"],
-  ["后天上午10点", "2026-10-28T10:00:00"],
-  // 2026-10-26 是周日 → 本周一=10-26，下周三 = 11-04
-  ["下周三下午2点", "2026-11-04T14:00:00"],
-  ["明早9点半", "2026-10-27T09:30:00"],
-  ["今晚8点", "2026-10-26T20:00:00"],
-  ["3月5日上午10点体检", "2027-03-05T10:00:00"],
-  ["明天15:30", "2026-10-27T15:30:00"],
+  ["明天下午3点和老王开项目评审会", at(dayOffset(1), "15:00:00")],
+  ["后天上午10点", at(dayOffset(2), "10:00:00")],
+  ["下周三下午2点", at(nextWeekWednesday(), "14:00:00")],
+  ["明早9点半", at(dayOffset(1), "09:30:00")],
+  ["今晚8点", at(dayOffset(0), "20:00:00")],
+  ["3月5日上午10点体检", `${nextMarch5()}T10:00:00`],
+  ["明天15:30", at(dayOffset(1), "15:30:00")],
 ];
 for (const [text, expect] of cases) {
   const r = await post("/api/nlp/parse", { text });
@@ -110,93 +130,119 @@ for (const [text, expect] of cases) {
 
 // ═══════════════ 3. 快速创建（端到端落盘）═══════════════
 section("3. 快速创建：解析 → 落盘 → 读回");
-let createdUid = null, createdTaskId = null;
+let createdId = null;
 {
   const p = await post("/api/nlp/parse", { text: "明天下午3点和老王开项目评审会" });
   const d = p.json.draft;
-  const r = await post("/api/md-bridge/events/add", {
-    event: { title: d.title, date: d.start, end: d.end, allDay: d.allDay },
+  const r = await post("/api/workspace/items", {
+    kind: "event",
+    title: d.title,
+    start: d.start,
+    end: d.end,
+    allDay: d.allDay,
   });
-  check("事件创建成功", r.status === 201 || r.json?.success === true, r.json);
-  createdUid = r.json?.event?.uid;
-  check("返回 uid", !!createdUid, r.json);
+  check("事件创建成功", r.status === 201 && r.json?.success === true, r.json);
+  createdId = r.json?.item?.id;
+  check("返回 id", typeof createdId === "string" && createdId.length > 0, r.json);
 
-  const read = await get("/api/md-bridge/events");
-  const found = read.json?.events?.find((e) => e.uid === createdUid);
-  check("事件已写入 events.md", !!found, read.json?.events);
+  const read = await get("/api/workspace/items");
+  const found = read.json?.items?.find((e) => e.id === createdId);
+  check("事件已写入 workspace.md", !!found, read.json?.items);
   check("标题正确", found?.title === "和老王开项目评审会", found?.title);
-  check("时间正确", found?.date === "2026-10-27T15:00:00", found?.date);
+  check("时间正确", found?.start === at(dayOffset(1), "15:00:00"), found?.start);
+  check("kind 保持 event", found?.kind === "event", found?.kind);
+
+  const dup = await post("/api/workspace/items", { id: createdId, title: "重复 id" });
+  check("**重复 id 返回 409**", dup.status === 409, dup.json);
+
+  const badField = await post("/api/workspace/items", { title: "x", nope: 1 });
+  check("**未知字段被拒绝**", badField.status === 400 && Array.isArray(badField.json?.errors), badField.json);
 }
 
-// ═══════════════ 4. 双向绑定 ═══════════════
-section("4. 任务 ↔ 事件 双向绑定");
+// ═══════════════ 4. 统一数据源（事件与任务同池）═══════════════
+section("4. 统一数据源：事件与任务在同一个条目池");
 {
-  const r = await post("/api/md-bridge/events/add", {
-    event: { title: "绑定测试", date: "2026-11-01T10:00:00" },
-    kanban: { priority: "高", project: "验收" },
-  });
-  check("创建事件+看板任务", r.json?.success === true, r.json);
-  createdTaskId = r.json?.kanbanTaskId;
-  check("返回 kanbanTaskId", !!createdTaskId, r.json);
-  check("事件上写入 kanbanTaskId", r.json?.event?.kanbanTaskId === createdTaskId, r.json?.event);
+  const ev = await get("/api/workspace/items?scope=calendar");
+  check("日历视角可读", ev.status === 200 && Array.isArray(ev.json?.items), ev.status);
+  check("**日历视角只含事件**", (ev.json?.items || []).every((i) => i.kind === "event"), ev.json?.items?.map((i) => i.kind));
 
-  const k = await get("/api/kanban");
-  const task = k.json?.todos?.find((t) => t.id === createdTaskId);
-  check("看板任务已创建", !!task, k.json?.todos);
-  check("任务标题正确", task?.title === "绑定测试", task);
-  check("**优先级正确（高）**", task?.priority === "高", task?.priority);
-  check("**项目正确（验收）**", task?.project === "验收", task?.project);
-  check("任务反向绑定到事件", task?.calendarEventUid === r.json?.event?.uid, task);
+  const task = await post("/api/workspace/items", { kind: "task", title: "验收任务", priority: "high", list: "验收" });
+  check("任务创建成功", task.status === 201, task.json);
+  const taskId = task.json?.item?.id;
+
+  const board = await get("/api/workspace/items?scope=board");
+  check("看板视角可读", board.status === 200 && Array.isArray(board.json?.items), board.status);
+  check("**看板视角含刚建的任务**", (board.json?.items || []).some((i) => i.id === taskId), board.json?.items?.map((i) => i.id));
+
+  const lists = await get("/api/workspace/lists");
+  check("清单聚合可用", lists.status === 200 && Array.isArray(lists.json?.lists), lists.json);
+  check("**新清单出现在聚合里**", (lists.json?.lists || []).some((l) => l.name === "验收"), lists.json?.lists);
+
+  const legacy = await get("/api/kanban");
+  check("**旧 /api/kanban 已退役（JSON 404）**", legacy.status === 404 && !!legacy.json?.error, legacy);
+  const legacy2 = await get("/api/md-bridge/events");
+  check("**旧 /api/md-bridge 已退役（JSON 404）**", legacy2.status === 404 && !!legacy2.json?.error, legacy2);
+
+  await del(`/api/workspace/items/${taskId}`);
 }
 
-// ═══════════════ 5. 看板 CRUD ═══════════════
-section("5. 看板任务增删改");
+// ═══════════════ 5. 任务 CRUD 与 id 稳定性 ═══════════════
+section("5. 任务增删改");
 {
-  const add = await post("/api/kanban/task", { title: "手动加的任务", priority: "低" });
-  check("新建任务", add.json?.success === true, add.json);
-  const tid = add.json?.todo?.id || add.json?.task?.id;
+  const add = await post("/api/workspace/items", { title: "手动加的任务", priority: "low" });
+  check("新建任务", add.status === 201, add.json);
+  const tid = add.json?.item?.id;
   check("返回任务 id", !!tid, add.json);
-  check("**新建任务 id 持久化到 md**", /id:[^|]+/.test(
-    (await get("/api/kanban")).json?.body || ""
-  ) || true);
 
-  const upd = await patch(`/api/kanban/task/${tid}`, { title: "改过的任务" });
+  const upd = await put(`/api/workspace/items/${tid}`, { title: "改过的任务" });
   check("修改任务", upd.json?.success === true, upd.json);
+  check("**修改不改变 id**", upd.json?.item?.id === tid, upd.json?.item);
 
-  const list = await get("/api/kanban");
-  const t = list.json?.todos?.find((x) => x.id === tid);
+  const done = await put(`/api/workspace/items/${tid}`, { done: true });
+  check("**标记完成**", done.json?.item?.done === true, done.json?.item);
+
+  const list = await get("/api/workspace/items");
+  const t = list.json?.items?.find((x) => x.id === tid);
   check("修改已生效", t?.title === "改过的任务", t);
 
-  // 关键回归：新增任务插到队首后，存量 id 不漂移
-  const beforeIds = list.json.todos.map((x) => x.id);
-  await post("/api/kanban/task", { title: "插队的新任务", priority: "中" });
-  const after = await get("/api/kanban");
-  const afterIds = after.json.todos.map((x) => x.id);
+  const beforeIds = list.json.items.map((x) => x.id);
+  await post("/api/workspace/items", { title: "插队的新任务", priority: "medium" });
+  const after = await get("/api/workspace/items");
+  const afterIds = after.json.items.map((x) => x.id);
   check("**新增任务后存量 id 不漂移**",
     beforeIds.every((id) => afterIds.includes(id)),
     { before: beforeIds, after: afterIds });
 
-  const d = await del(`/api/kanban/task/${tid}`);
+  const d = await del(`/api/workspace/items/${tid}`);
   check("删除任务", d.json?.success === true, d.json);
-  const after2 = await get("/api/kanban");
-  check("删除后该任务消失", !after2.json.todos.some((x) => x.id === tid));
-  check("**删除一个不影响其他任务**", after2.json.todos.length === afterIds.length - 1,
-    { expected: afterIds.length - 1, got: after2.json.todos.length });
+  const after2 = await get("/api/workspace/items");
+  check("删除后该任务消失", !after2.json.items.some((x) => x.id === tid));
+
+  const missing = await del(`/api/workspace/items/${tid}`);
+  check("**删除不存在的条目返回 404**", missing.status === 404, missing.json);
+
+  const frozen = await put(`/api/workspace/items/${createdId}`, { id: "hacked" });
+  check("**不可修改字段被拒绝**", frozen.status === 400 && Array.isArray(frozen.json?.editableFields), frozen.json);
 }
 
-// ═══════════════ 6. 级联删除 ═══════════════
-section("6. 级联删除与解绑");
+// ═══════════════ 6. 级联删除与父任务 ═══════════════
+section("6. 子任务级联删除");
 {
-  const r = await post("/api/md-bridge/events/add", {
-    event: { title: "级联删除测试", date: "2026-11-02T10:00:00" },
-    kanban: { priority: "中" },
-  });
-  const uid = r.json?.event?.uid;
-  const tid = r.json?.kanbanTaskId;
-  const d = await del(`/api/md-bridge/events/${uid}`);
-  check("删除事件", d.json?.success === true, d.json);
-  const k = await get("/api/kanban");
-  check("**关联任务被级联删除**", !k.json.todos.some((t) => t.id === tid), k.json.todos?.map(t=>t.id));
+  const parent = await post("/api/workspace/items", { title: "父任务" });
+  const pid = parent.json?.item?.id;
+  const c1 = await post("/api/workspace/items", { title: "子任务1", parent: pid });
+  const c2 = await post("/api/workspace/items", { title: "子任务2", parent: pid });
+  check("父任务创建", parent.status === 201, parent.json);
+  check("子任务创建", c1.status === 201 && c2.status === 201, { c1: c1.json, c2: c2.json });
+
+  const d = await del(`/api/workspace/items/${pid}`);
+  check("删除父任务", d.json?.success === true, d.json);
+  check("**级联删除 2 个子任务**", d.json?.removedChildren === 2, d.json);
+
+  const all = await get("/api/workspace/items");
+  check("**子任务已从数据源消失**",
+    !all.json.items.some((i) => i.parent === pid),
+    all.json.items.filter((i) => i.parent === pid));
 }
 
 // ═══════════════ 7. ICS 导入导出 ═══════════════
@@ -213,47 +259,64 @@ section("7. iCalendar 导入 / 导出");
     "END:VCALENDAR",
   ].join("\r\n");
 
-  const dry = await post("/api/md-bridge/ics/import", { icsContent: ics, dryRun: true });
-  check("dryRun 解析出 2 条", dry.json?.parsedCount === 2, dry.json);
-  check("dryRun 不写盘", dry.json?.dryRun === true);
+  const dry = await post("/api/workspace/ics/import", { icsContent: ics, dryRun: true });
+  check("dryRun 解析出 2 条", dry.json?.parsed === 2, dry.json);
+  check("dryRun 不写盘", dry.json?.dryRun === true, dry.json);
+  const beforeCount = (await get("/api/workspace/items")).json?.count;
 
-  const imp = await post("/api/md-bridge/ics/import", { icsContent: ics });
-  check("导入 2 条", imp.json?.importedCount === 2, imp.json);
+  const imp = await post("/api/workspace/ics/import", { icsContent: ics });
+  check("导入 2 条", imp.json?.imported === 2, imp.json);
 
-  const dup = await post("/api/md-bridge/ics/import", { icsContent: ics });
-  check("重复导入被去重", dup.json?.skippedCount === 2 && dup.json?.importedCount === 0, dup.json);
+  const dup = await post("/api/workspace/ics/import", { icsContent: ics });
+  check("重复导入被去重", dup.json?.skipped === 2 && dup.json?.imported === 0, dup.json);
 
-  const exp = await get("/api/md-bridge/ics/export");
-  check("导出成功", exp.status === 200 && !!exp.json?.icsContent);
-  const hasTitle = exp.json.icsContent.includes("导入的会议");
-  check("导出内容含导入的事件", hasTitle);
-  check("**导出用本地时间+TZID（不是 UTC）**",
-    /DTSTART;TZID=/.test(exp.json.icsContent),
-    exp.json.icsContent?.split("\n").find(l=>l.startsWith("DTSTART")));
+  const exp = await get("/api/workspace/ics/export");
+  check("导出成功", exp.status === 200 && typeof exp.json?.ics === "string", exp.status);
+  check("导出内容含导入的事件", exp.json.ics.includes("导入的会议"));
+  check("**导出用浮动本地时间（不带 Z）**",
+    !/DTSTART:\d{8}T\d{6}Z/.test(exp.json.ics),
+    exp.json.ics?.split("\n").find((l) => l.startsWith("DTSTART:") && !l.includes("VALUE=DATE")));
+  check("**全天事件写成 VALUE=DATE**", /DTSTART;VALUE=DATE:/.test(exp.json.ics));
+  check("导出条数与数据源一致", exp.json?.count === (await get("/api/workspace/items")).json?.count, exp.json?.count);
 
-  const bad = await post("/api/md-bridge/ics/import", { icsContent: "这不是日历" });
+  const bad = await post("/api/workspace/ics/import", { icsContent: "这不是日历" });
   check("非 ICS 文件返回 400 + 提示", bad.status === 400 && !!bad.json?.error, bad.json);
 
+  const noBody = await post("/api/workspace/ics/import", {});
+  check("**缺 icsContent 返回 400**", noBody.status === 400, noBody.json);
+
   // 清理导入的事件
-  const all = await get("/api/md-bridge/events");
-  for (const e of all.json.events.filter((e) => e.uid?.startsWith("imp-"))) {
-    await del(`/api/md-bridge/events/${e.uid}`);
+  const all = await get("/api/workspace/items");
+  for (const e of all.json.items.filter((i) => i.uid === "imp-1" || i.uid === "imp-2")) {
+    await del(`/api/workspace/items/${e.id}`);
   }
+  const after = await get("/api/workspace/items");
+  check("清理后条数回落", after.json.count <= beforeCount + 1, { before: beforeCount, after: after.json.count });
 }
 
 // ═══════════════ 8. 事件编辑 ═══════════════
 section("8. 事件编辑");
 {
-  const r = await post("/api/md-bridge/events/add", {
-    event: { title: "待编辑事件", date: "2026-11-05T09:00:00" },
+  const r = await post("/api/workspace/items", {
+    kind: "event",
+    title: "待编辑事件",
+    start: "2026-11-05T09:00:00",
+    end: "2026-11-05T10:00:00",
   });
-  const uid = r.json.event.uid;
-  const u = await put(`/api/md-bridge/events/${uid}`, { title: "已改标题" });
+  const id = r.json?.item?.id;
+  check("事件创建", r.status === 201 && !!id, r.json);
+
+  const u = await put(`/api/workspace/items/${id}`, { title: "已改标题" });
   check("更新事件", u.json?.success === true, u.json);
-  check("**kanbanTaskId 未被覆盖**", u.json?.event?.kanbanTaskId === undefined, u.json?.event);
-  const list = await get("/api/md-bridge/events");
-  check("修改已落盘", list.json.events.find((e) => e.uid === uid)?.title === "已改标题");
-  await del(`/api/md-bridge/events/${uid}`);
+  check("**更新不丢 kind**", u.json?.item?.kind === "event", u.json?.item);
+  check("**更新不丢时间**", u.json?.item?.start === "2026-11-05T09:00:00", u.json?.item);
+
+  const badRange = await put(`/api/workspace/items/${id}`, { end: "2026-11-05T08:00:00" });
+  check("**end 早于 start 被拒绝**", badRange.status === 400, badRange.json);
+
+  const list = await get("/api/workspace/items");
+  check("修改已落盘", list.json.items.find((e) => e.id === id)?.title === "已改标题");
+  await del(`/api/workspace/items/${id}`);
 }
 
 // ═══════════════ 9. 插件系统 ═══════════════
@@ -272,9 +335,12 @@ section("10. 配置系统（界面可改 + 持久化）");
   const g = await get("/api/config");
   check("配置 API 可用", g.status === 200, g.status);
   check("返回配置文件路径", !!g.json?.file?.path, g.json?.file);
-  check("**敏感字段已脱敏**", !String(g.json?.config?.caldav?.password || "").includes("tianleiyu"),
+  check("**敏感字段已脱敏**",
+    String(g.json?.config?.caldav?.password || "").includes("****") || g.json?.config?.caldav?.password === "",
     g.json?.config?.caldav?.password);
-  check("CalDAV 从 .env 读到", g.json?.config?.caldav?.rootUrl?.includes("radical"), g.json?.config?.caldav);
+  check("CalDAV 根地址已读到（隔离服务写死为不可达地址）",
+    String(g.json?.config?.caldav?.rootUrl || "").startsWith("http://127.0.0.1:9/"),
+    g.json?.config?.caldav);
 
   const s = await put("/api/config", { ai: { enabled: true, baseUrl: "https://x/v1", apiKey: "sk-abc123456789" } });
   check("保存配置", s.json?.success === true, s.json);
@@ -284,7 +350,9 @@ section("10. 配置系统（界面可改 + 持久化）");
   check("保存后能读回", g2.json?.config?.ai?.baseUrl === "https://x/v1", g2.json?.config?.ai);
 
   const disk = await get("/api/config");
-  check("**磁盘真值未被掩码覆盖**", disk.json?.config?.ai?.apiKey === "sk-****3456" || true);
+  check("**磁盘真值未被掩码覆盖**",
+    String(disk.json?.config?.ai?.apiKey || "").startsWith("sk-****"),
+    disk.json?.config?.ai?.apiKey);
 }
 
 // ═══════════════ 11. WebDAV / AI（未配置时的表现）═══════════════

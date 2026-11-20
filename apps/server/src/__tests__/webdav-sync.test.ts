@@ -19,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import express from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { apiErrorHandler } from "../http-errors.js";
 
 // ===== 模拟 WebDAV 服务端 =====
 type RemoteEntry = { content: string; etag: string };
@@ -27,6 +28,11 @@ const remoteStore = new Map<string, RemoteEntry>();
 const createdDirs = new Set<string>();
 let etagSeq = 0;
 let authShouldFail = false;
+/**
+ * 模拟 OneDrive / SharePoint 风格网关：PUT 响应头的 ETag 与随后
+ * HEAD/GET 返回的 ETag 属于不同命名空间（短哈希 vs `{GUID},N`）。
+ */
+let divergentPutEtag = false;
 
 function newEtag(): string {
   etagSeq += 1;
@@ -110,7 +116,11 @@ const davServer = http.createServer((req, res) => {
     req.on("end", () => {
       const etag = newEtag();
       remoteStore.set(pathname, { content: body, etag });
-      res.writeHead(201, { ETag: etag });
+      // divergentPutEtag：PUT 返回短哈希，而 HEAD/GET 返回 `{GUID},N`
+      const header = divergentPutEtag
+        ? `"put-${etagSeq}"`
+        : etag;
+      res.writeHead(201, { ETag: header });
       res.end();
     });
     return;
@@ -192,6 +202,7 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.use("/api/webdav", webdavRouter);
+  app.use(apiErrorHandler);
   apiServer = app.listen(0);
   await new Promise<void>((r) => apiServer.once("listening", r));
 });
@@ -215,11 +226,11 @@ async function post(p: string, body?: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
-  return { status: r.status, json: await r.json() };
+  return { status: r.status, json: (await r.json()) as any };
 }
 async function get(p: string) {
   const r = await fetch(`${apiBase()}${p}`);
-  return { status: r.status, json: await r.json() };
+  return { status: r.status, json: (await r.json()) as any };
 }
 
 // ===== 用例 =====
@@ -340,6 +351,53 @@ describe("WebDAV push", () => {
   });
 });
 
+describe("ETag 命名空间不一致的网关（OneDrive / SharePoint）", () => {
+  // 这类网关 PUT 响应头返回短哈希 ETag，HEAD/GET 却返回 `{GUID},N`。
+  // 如果把 PUT 的 ETag 当作同步基线，第二次 push 必然误判冲突。
+  it("记录基线与 HEAD 同源，二次 push 不误报冲突", async () => {
+    divergentPutEtag = true;
+    try {
+      fs.writeFileSync(wsFile, "网关场景内容", "utf-8");
+      const first = await post("/api/webdav/push", { force: true });
+      expect(first.json.success).toBe(true);
+      const firstEv = first.json.results.find((x: any) => x.key === "workspace");
+      expect(firstEv.ok).toBe(true);
+
+      // 基线必须等于 HEAD 读到的 ETag（同一命名空间），而不是 PUT 响应头
+      const st = readSyncState(wsFile);
+      const remote = remoteStore.get(WORKSPACE_REMOTE)!;
+      // 状态里存的是规范化后的 ETag（去引号），与 statRemoteFile 同源
+      expect(st.etags["workspace.md"]).toBe(normalizeEtag(remote.etag));
+      expect(st.etags["workspace.md"]).not.toMatch(/^put-/);
+
+      // 内容没变 → 再次 push 不应误报冲突
+      const second = await post("/api/webdav/push");
+      const secondEv = second.json.results.find((x: any) => x.key === "workspace");
+      expect(secondEv.conflict).toBeUndefined();
+      expect(secondEv.ok).toBe(true);
+    } finally {
+      divergentPutEtag = false;
+    }
+  });
+
+  it("该网关下远端真被改动时仍能检测出冲突", async () => {
+    divergentPutEtag = true;
+    try {
+      fs.writeFileSync(wsFile, "基线内容", "utf-8");
+      await post("/api/webdav/push", { force: true });
+
+      simulateExternalEdit(WORKSPACE_REMOTE, "别的设备改的");
+      const r = await post("/api/webdav/push");
+      const ev = r.json.results.find((x: any) => x.key === "workspace");
+      expect(ev.conflict).toBe(true);
+      // 仍然不静默覆盖
+      expect(remoteStore.get(WORKSPACE_REMOTE)?.content).toContain("别的设备改的");
+    } finally {
+      divergentPutEtag = false;
+    }
+  });
+});
+
 describe("WebDAV pull", () => {
   it("远端有更新时覆盖本地并备份原文件", async () => {
     // 自备本地文件（前一个测试会删掉它），并先同步一次建立基线 ETag
@@ -369,6 +427,114 @@ describe("WebDAV pull", () => {
     const ev = r.json.results.find((x: any) => x.key === "workspace");
     expect(ev.overwritten).toBe(true);
     expect(fs.readFileSync(wsFile, "utf-8")).toContain("远端新内容");
+  });
+});
+
+describe("WebDAV 合并（冲突时的第三个选项）", () => {
+  function mdItem(id: string, title: string, extra = ""): string {
+    return `## ${title}\n- id: ${id}\n- kind: task\n${extra}\n`;
+  }
+  function writeLocal(items: string[], notes = ""): void {
+    fs.writeFileSync(
+      wsFile,
+      `---\nschema: workbench/v1\n---\n\n${items.join("\n")}${
+        notes ? `<!-- notes -->\n${notes}\n` : ""
+      }`,
+      "utf-8",
+    );
+  }
+  function seedRemote(items: string[], notes = ""): void {
+    simulateExternalEdit(
+      WORKSPACE_REMOTE,
+      `---\nschema: workbench/v1\n---\n\n${items.join("\n")}${
+        notes ? `<!-- notes -->\n${notes}\n` : ""
+      }`,
+    );
+  }
+
+  it("两边独有的条目都保留，并同步回远端", async () => {
+    writeLocal([
+      mdItem("aaa11111", "只在本地的A"),
+      mdItem("bbb22222", "共有的B", "- updatedAt: 2026-11-02T00:00:00.000Z"),
+    ]);
+    seedRemote([
+      mdItem("bbb22222", "共有的B", "- updatedAt: 2026-11-01T00:00:00.000Z"),
+      mdItem("ccc33333", "只在远端的C"),
+    ]);
+
+    const r = await post("/api/webdav/merge");
+    expect(r.json.success).toBe(true);
+    expect(r.json.merged.localOnly).toBe(1);
+    expect(r.json.merged.remoteOnly).toBe(1);
+
+    const local = fs.readFileSync(wsFile, "utf-8");
+    expect(local).toContain("只在本地的A");
+    expect(local).toContain("只在远端的C");
+
+    const remote = remoteStore.get(WORKSPACE_REMOTE)!.content;
+    expect(remote).toContain("只在本地的A");
+    expect(remote).toContain("只在远端的C");
+    expect(fs.existsSync(`${wsFile}.bak`)).toBe(true);
+  });
+
+  it("同 id 远端更新 → 采用远端版本", async () => {
+    writeLocal([
+      mdItem("bbb22222", "旧标题", "- updatedAt: 2026-11-01T00:00:00.000Z"),
+    ]);
+    seedRemote([
+      mdItem("bbb22222", "远端新版", "- updatedAt: 2026-11-02T00:00:00.000Z"),
+    ]);
+
+    const r = await post("/api/webdav/merge");
+    expect(r.json.merged.fromRemote).toBe(1);
+    expect(fs.readFileSync(wsFile, "utf-8")).toContain("远端新版");
+  });
+
+  it("同 id 本地更新 → 保留本地版本", async () => {
+    writeLocal([
+      mdItem("bbb22222", "本地新版", "- updatedAt: 2026-11-03T00:00:00.000Z"),
+    ]);
+    seedRemote([
+      mdItem("bbb22222", "远端旧版", "- updatedAt: 2026-11-01T00:00:00.000Z"),
+    ]);
+
+    const r = await post("/api/webdav/merge");
+    expect(r.json.merged.fromLocal).toBe(1);
+    const local = fs.readFileSync(wsFile, "utf-8");
+    expect(local).toContain("本地新版");
+    expect(local).not.toContain("远端旧版");
+  });
+
+  it("同 id 时间相同但内容不同 → 保留本地并报告冲突", async () => {
+    writeLocal([mdItem("bbb22222", "本地版本")]);
+    seedRemote([mdItem("bbb22222", "远端版本")]);
+
+    const r = await post("/api/webdav/merge");
+    expect(r.json.merged.conflicts).toHaveLength(1);
+    expect(r.json.merged.conflicts[0].id).toBe("bbb22222");
+    expect(fs.readFileSync(wsFile, "utf-8")).toContain("本地版本");
+  });
+
+  it("两边笔记都保留", async () => {
+    writeLocal([mdItem("aaa11111", "A")], "本地笔记");
+    seedRemote([mdItem("ccc33333", "C")], "远端笔记");
+
+    const r = await post("/api/webdav/merge");
+    expect(r.json.success).toBe(true);
+    const local = fs.readFileSync(wsFile, "utf-8");
+    expect(local).toContain("本地笔记");
+    expect(local).toContain("远端笔记");
+  });
+
+  it("远端没有文件时明确报错，不做任何写入", async () => {
+    remoteStore.delete(WORKSPACE_REMOTE);
+    writeLocal([mdItem("aaa11111", "本地A")]);
+    const before = fs.readFileSync(wsFile, "utf-8");
+
+    const r = await post("/api/webdav/merge");
+    expect(r.status).toBe(400);
+    expect(r.json.error).toMatch(/远端还没有/);
+    expect(fs.readFileSync(wsFile, "utf-8")).toBe(before);
   });
 });
 

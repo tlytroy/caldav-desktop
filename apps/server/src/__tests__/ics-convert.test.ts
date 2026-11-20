@@ -5,6 +5,7 @@ import {
   itemToIcsEvent,
   icsEventToItem,
   itemsToIcsMap,
+  idFromUid,
 } from "../ics-convert.js";
 import type { WorkbenchItem } from "../workspace.js";
 
@@ -300,5 +301,60 @@ describe("完整往返", () => {
     expect(back.allDay).toBe(true);
     expect(back.start).toBe("2026-10-28T00:00:00");
     expect(back.end).toBe("2026-10-29T00:00:00");
+  });
+});
+
+describe("UID 与项目字段（CalDAV 同步依赖）", () => {
+  it("UID 优先用条目的 uid 字段", () => {
+    const ics = itemsToIcs([{ ...baseItem, uid: "remote-uid-xyz" }]);
+    expect(ics).toContain("UID:remote-uid-xyz");
+    // 不能顺手把本地 id 也写成另一个 UID
+    expect(ics).not.toContain("UID:a1b2c3d4");
+  });
+
+  it("project 走 X-WORKBENCH-PROJECT，不混进 tags", () => {
+    const ics = itemsToIcs([
+      { ...baseItem, project: "竞聘", tags: ["重要", "对外"] },
+    ]);
+    expect(ics).toContain("X-WORKBENCH-PROJECT:竞聘");
+    expect(ics).not.toContain("CATEGORIES:竞聘");
+
+    const ev = parseIcsEvents(ics)[0];
+    expect(ev.project).toBe("竞聘");
+    expect(ev.tags).toEqual(["重要", "对外"]);
+  });
+
+  it("idFromUid 是确定性的；8 位 hex 的 UID 原样复用", () => {
+    expect(idFromUid("remote-uid-1")).toBe(idFromUid("remote-uid-1"));
+    expect(idFromUid("a1b2c3d4")).toBe("a1b2c3d4");
+    expect(idFromUid("remote-uid-1")).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it("ICS → 条目保留 uid 与 LAST-MODIFIED", () => {
+    const ics = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:remote-1
+DTSTART:20261102T090000
+SUMMARY:x
+LAST-MODIFIED:20261102T020000Z
+END:VEVENT
+END:VCALENDAR`;
+    const item = icsEventToItem(parseIcsEvents(ics)[0]);
+    expect(item.uid).toBe("remote-1");
+    expect(item.updatedAt).toBe("2026-11-02T02:00:00.000Z");
+    expect(item.id).toBe(idFromUid("remote-1"));
+  });
+
+  it("DTSTAMP / LAST-MODIFIED 输出 UTC（带 Z）", () => {
+    const ics = itemsToIcs([
+      {
+        ...baseItem,
+        createdAt: "2026-11-02T10:00:00.000Z",
+        updatedAt: "2026-11-02T10:30:00.000Z",
+      },
+    ]);
+    expect(ics).toMatch(/DTSTAMP:\d{8}T\d{6}Z/);
+    expect(ics).toContain("CREATED:20261102T100000Z");
+    expect(ics).toContain("LAST-MODIFIED:20261102T103000Z");
   });
 });

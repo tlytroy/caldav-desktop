@@ -3,6 +3,7 @@ import express from "express";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { apiErrorHandler } from "../http-errors.js";
 
 let workspaceRouter: any;
 let tmpDir: string;
@@ -21,6 +22,7 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.use("/api/workspace", workspaceRouter);
+  app.use(apiErrorHandler);
   server = app.listen(0);
   await new Promise<void>((r) => server.once("listening", r));
   baseUrl = `http://127.0.0.1:${(server.address() as any).port}`;
@@ -38,7 +40,7 @@ beforeEach(() => {
 
 async function get(p: string) {
   const res = await fetch(`${baseUrl}${p}`);
-  return { status: res.status, json: await res.json() };
+  return { status: res.status, json: (await res.json()) as any };
 }
 
 async function post(p: string, body: any) {
@@ -47,7 +49,7 @@ async function post(p: string, body: any) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: await res.json() };
+  return { status: res.status, json: (await res.json()) as any };
 }
 
 async function put(p: string, body: any) {
@@ -56,12 +58,12 @@ async function put(p: string, body: any) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: await res.json() };
+  return { status: res.status, json: (await res.json()) as any };
 }
 
 async function del(p: string) {
   const res = await fetch(`${baseUrl}${p}`, { method: "DELETE" });
-  return { status: res.status, json: await res.json() };
+  return { status: res.status, json: (await res.json()) as any };
 }
 
 describe("workspace API —— 列表与筛选", () => {
@@ -273,6 +275,40 @@ describe("workspace API —— 更新与删除", () => {
     expect(list.json.count).toBe(0);
   });
 
+  it("删除父任务会级联删除整棵子任务树（不留孤儿）", async () => {
+    const p = await post("/api/workspace/items", {
+      title: "父任务",
+      kind: "task",
+    });
+    const pid = p.json.item.id;
+    const c1 = await post("/api/workspace/items", {
+      title: "子任务1",
+      kind: "task",
+      parent: pid,
+    });
+    const c2 = await post("/api/workspace/items", {
+      title: "子任务2",
+      kind: "task",
+      parent: pid,
+    });
+    await post("/api/workspace/items", {
+      title: "孙任务",
+      kind: "task",
+      parent: c1.json.item.id,
+    });
+    // 另一棵无关任务不能被误删
+    await post("/api/workspace/items", { title: "无关任务", kind: "task" });
+
+    const r = await del(`/api/workspace/items/${pid}`);
+    expect(r.status).toBe(200);
+    expect(r.json.removedChildren).toBe(3);
+
+    const list = await get("/api/workspace/items");
+    expect(list.json.count).toBe(1);
+    expect(list.json.items[0].title).toBe("无关任务");
+    void c2;
+  });
+
   it("删除不存在的条目返回 404", async () => {
     const r = await del("/api/workspace/items/zzzzzzzz");
     expect(r.status).toBe(404);
@@ -281,6 +317,27 @@ describe("workspace API —— 更新与删除", () => {
   it("更新不存在的条目返回 404", async () => {
     const r = await put("/api/workspace/items/zzzzzzzz", { title: "x" });
     expect(r.status).toBe(404);
+  });
+
+  it("创建与更新支持 remind，清空用 null", async () => {
+    const c = await post("/api/workspace/items", {
+      title: "带提醒",
+      kind: "event",
+      start: "2026-11-02T10:00:00",
+      remind: "2026-11-02T09:30:00",
+    });
+    expect(c.status).toBe(201);
+    expect(c.json.item.remind).toBe("2026-11-02T09:30:00");
+
+    const r = await put(`/api/workspace/items/${c.json.item.id}`, {
+      remind: "2026-11-02T09:00:00",
+    });
+    expect(r.json.item.remind).toBe("2026-11-02T09:00:00");
+
+    const cleared = await put(`/api/workspace/items/${c.json.item.id}`, {
+      remind: null,
+    });
+    expect(cleared.json.item.remind).toBeUndefined();
   });
 
   it("标记完成", async () => {

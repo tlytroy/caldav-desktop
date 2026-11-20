@@ -25,13 +25,13 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
 /**
- * ESM 环境下没有 __dirname，用 import.meta.url 推导。
- * （`import.meta.dirname` 需要 Node 20.11+，这里用更通用的写法）
+ * 兼容两种运行时：ESM（tsx/开发）没有 __dirname，CJS（Electron 打包）有。
+ * 不用 import.meta：打成 CJS 后会变成空对象，fileURLToPath 直接抛错。
  */
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const currentDir =
+  typeof __dirname === "string" && __dirname ? __dirname : process.cwd();
 
 /** 配置结构（config.json 的形状） */
 export interface AppConfig {
@@ -61,10 +61,35 @@ export interface AppConfig {
     rootUrl: string;
     username: string;
     password: string;
+    /** 具体日历 URL；留空 = 自动发现第一个日历 */
+    calendarUrl: string;
+    /** 单次请求超时（毫秒） */
+    timeoutMs: number;
     /** 同步方向 */
     syncDirection: "push" | "pull" | "bidirectional";
     /** 自动同步间隔（分钟），0 = 仅手动 */
     autoSyncMinutes: number;
+  };
+
+  /**
+   * 提醒推送（服务端主动推送到手机）。
+   *
+   * 与渲染进程里的「应用内提醒」是两条独立通道：
+   *  - 应用内提醒：只在本机应用打开时弹卡片
+   *  - 这里的推送：由后端定时检查 workspace.md，发给企业微信 / Server酱 / Bark 等，
+   *    所以 Docker 部署的后端可以 7×24 推送
+   */
+  notifications: {
+    /** 总开关；关闭时服务端不推送（应用内提醒不受影响） */
+    enabled: boolean;
+    channels: {
+      wecom: { enabled: boolean; webhookUrl: string };
+      serverchan: { enabled: boolean; sendKey: string };
+      pushplus: { enabled: boolean; token: string };
+      bark: { enabled: boolean; serverUrl: string; deviceKey: string };
+      ntfy: { enabled: boolean; url: string; topic: string; token: string };
+      webhook: { enabled: boolean; url: string };
+    };
   };
 
   /** WebDAV 同步 */
@@ -98,10 +123,6 @@ export interface AppConfig {
      * 事件与任务在同一个条目池里，日历 / 看板 / 快速创建都只是它的视图。
      */
     workspaceFile: string;
-    /** @deprecated 旧的事件文件，迁移用 */
-    eventsFile: string;
-    /** @deprecated 旧的工作搭子看板文件，迁移用 */
-    kanbanFile: string;
   };
 }
 
@@ -125,8 +146,21 @@ export const DEFAULT_CONFIG: AppConfig = {
     rootUrl: "",
     username: "",
     password: "",
+    calendarUrl: "",
+    timeoutMs: 15000,
     syncDirection: "bidirectional",
     autoSyncMinutes: 0,
+  },
+  notifications: {
+    enabled: false,
+    channels: {
+      wecom: { enabled: false, webhookUrl: "" },
+      serverchan: { enabled: false, sendKey: "" },
+      pushplus: { enabled: false, token: "" },
+      bark: { enabled: false, serverUrl: "https://api.day.app", deviceKey: "" },
+      ntfy: { enabled: false, url: "https://ntfy.sh", topic: "", token: "" },
+      webhook: { enabled: false, url: "" },
+    },
   },
   webdav: {
     enabled: false,
@@ -142,13 +176,21 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   paths: {
     workspaceFile: "./workspace.md",
-    eventsFile: "./events.md",
-    kanbanFile: "./工作搭子看板.md",
   },
 };
 
 /** 敏感字段清单：读取时掩码，写入时识别"未修改" */
-const SECRET_FIELDS = ["ai.apiKey", "caldav.password", "webdav.password"] as const;
+const SECRET_FIELDS = [
+  "ai.apiKey",
+  "caldav.password",
+  "webdav.password",
+  "notifications.channels.wecom.webhookUrl",
+  "notifications.channels.serverchan.sendKey",
+  "notifications.channels.pushplus.token",
+  "notifications.channels.bark.deviceKey",
+  "notifications.channels.ntfy.token",
+  "notifications.channels.webhook.url",
+] as const;
 
 export type SecretField = (typeof SECRET_FIELDS)[number];
 
@@ -242,6 +284,18 @@ function configFromEnv(): Partial<AppConfig> {
   const aiEnabled = get("AI_ENABLED") === "true" || !!get("AI_API_KEY");
   const webdavUrl = get("WEBDAV_URL") || "";
 
+  // 推送总开关：显式 NOTIFY_ENABLED 优先；否则「配了任一渠道」就自动打开，
+  // 避免只填了 Server酱 key 却因为忘了总开关而收不到。
+  const pushConfigured = !!(
+    get("WECOM_WEBHOOK") ||
+    get("SERVERCHAN_SENDKEY") ||
+    get("PUSHPLUS_TOKEN") ||
+    get("BARK_DEVICE_KEY") ||
+    get("NTFY_TOPIC") ||
+    get("NOTIFY_WEBHOOK_URL")
+  );
+  const notifyFlag = get("NOTIFY_ENABLED");
+
   return {
     language: get("APP_LANGUAGE") || DEFAULT_CONFIG.language,
     ai: {
@@ -258,10 +312,45 @@ function configFromEnv(): Partial<AppConfig> {
       rootUrl: get("CALDAV_ROOT_URL") || get("CALDAV_URL") || "",
       username: get("CALDAV_USER") || "",
       password: get("CALDAV_PASS") || "",
+      calendarUrl: get("CALDAV_CALENDAR_URL") || "",
+      timeoutMs: parseInt(get("CALDAV_TIMEOUT_MS") || "15000", 10) || 15000,
       syncDirection:
         (get("MD_ICS_SYNC_DIRECTION") as any) || DEFAULT_CONFIG.caldav.syncDirection,
       autoSyncMinutes:
         parseInt(get("MD_ICS_AUTO_SYNC_MINUTES") || "0", 10) || 0,
+    },
+    notifications: {
+      enabled:
+        notifyFlag === "true" ? true : notifyFlag === "false" ? false : pushConfigured,
+      channels: {
+        wecom: {
+          enabled: !!get("WECOM_WEBHOOK"),
+          webhookUrl: get("WECOM_WEBHOOK") || "",
+        },
+        serverchan: {
+          enabled: !!get("SERVERCHAN_SENDKEY"),
+          sendKey: get("SERVERCHAN_SENDKEY") || "",
+        },
+        pushplus: {
+          enabled: !!get("PUSHPLUS_TOKEN"),
+          token: get("PUSHPLUS_TOKEN") || "",
+        },
+        bark: {
+          enabled: !!get("BARK_DEVICE_KEY"),
+          serverUrl: get("BARK_SERVER_URL") || "https://api.day.app",
+          deviceKey: get("BARK_DEVICE_KEY") || "",
+        },
+        ntfy: {
+          enabled: !!get("NTFY_TOPIC"),
+          url: get("NTFY_URL") || "https://ntfy.sh",
+          topic: get("NTFY_TOPIC") || "",
+          token: get("NTFY_TOKEN") || "",
+        },
+        webhook: {
+          enabled: !!get("NOTIFY_WEBHOOK_URL"),
+          url: get("NOTIFY_WEBHOOK_URL") || "",
+        },
+      },
     },
     webdav: {
       enabled: !!webdavUrl,
@@ -368,13 +457,16 @@ export function saveConfig(patch: Partial<AppConfig>): AppConfig {
   const current = getConfig();
   const merged = deepMerge(current, patch);
 
-  // 处理掩码占位：还原为原值
+  // 处理掩码占位：还原为原值。
+  // 注意路径可能是多层（notifications.channels.wecom.webhookUrl），
+  // 不能只取 parts[0]/parts[1]。
   for (const f of SECRET_FIELDS) {
     const parts = f.split(".");
-    const incoming = (patch as any)?.[parts[0]]?.[parts[1]];
+    const read = (root: any): unknown =>
+      parts.reduce((obj: any, k) => (obj == null ? undefined : obj[k]), root);
+    const incoming = read(patch);
     if (typeof incoming === "string" && isMaskedPlaceholder(incoming)) {
-      // 保留 current 里的原值
-      const orig = (current as any)[parts[0]]?.[parts[1]];
+      const orig = read(current);
       let obj: any = merged as any;
       for (let i = 0; i < parts.length - 1; i++) obj = obj[parts[i]];
       obj[parts[parts.length - 1]] = orig;
@@ -408,41 +500,22 @@ export function getSecret(field: SecretField): string {
  *
  * 相对路径基于**进程 cwd** 解析（与 .env 里的写法一致）。
  */
-export function resolveDataPath(
-  kind: "workspace" | "events" | "kanban",
-): string {
-  const envKey =
-    kind === "workspace"
-      ? "WORKSPACE_FILE"
-      : kind === "events"
-        ? "MD_EVENTS_FILE"
-        : "KANBAN_FILE_PATH";
-  const envVal = process.env[envKey];
+export function resolveDataPath(kind: "workspace" = "workspace"): string {
+  void kind;
+  const envVal = process.env.WORKSPACE_FILE;
   if (envVal && envVal.trim()) {
     const p = envVal.trim();
     return path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
   }
 
   const cfg = getConfig();
-  const raw =
-    (kind === "workspace"
-      ? cfg.paths?.workspaceFile
-      : kind === "events"
-        ? cfg.paths?.eventsFile
-        : cfg.paths?.kanbanFile) || "";
+  const raw = cfg.paths?.workspaceFile || "";
   if (raw.trim()) {
     const p = raw.trim();
     return path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
   }
 
-  return path.resolve(
-    process.cwd(),
-    kind === "workspace"
-      ? "workspace.md"
-      : kind === "events"
-        ? "events.md"
-        : "工作搭子看板.md",
-  );
+  return path.resolve(process.cwd(), "workspace.md");
 }
 
 /** 配置是否存在于磁盘 */

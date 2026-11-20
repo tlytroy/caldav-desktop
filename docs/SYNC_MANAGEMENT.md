@@ -1,219 +1,250 @@
-# Sync Management & Caching Guide
+# 同步通道说明（WebDAV / CalDAV）
 
-> ⚠️ **文档状态说明（2026-10-19 校正）**
->
-> 本文档上半部分描述的 **localStorage 缓存方案已经不再被写入**。
-> 2026-08-21 的数据流重构后，日历模块改读 `events.md`（`useCalendarEvents`
-> 不再调用 `setCachedEvents`），`syncStore.cachedEvents` 目前是**只读的空对象**。
-> 这也是工作台「今日事件 / 事件总数」恒为 0 的根因（已于 2026-10-19 修复为直接读 events.md）。
->
-> 下方「MD Bridge Sync」章节才是当前真实生效的同步机制。
-> 上半部分保留作为历史设计说明，其中「缓存过期 1 小时」「事件驱动自动同步」
-> 「底部状态栏同步按钮」等描述**与当前实现不符**，不要据此排障。
+> **2026-11-02 重写。** 上一版描述的是「`events.md` + `工作搭子看板.md` 两个文件」
+> 同步，以及一套基于 `localStorage` 的缓存方案 —— **两者都已不存在**。
+> 现在同步的对象只有一个文件：`workspace.md`。
 
-## Overview
-
-CalDAV Desktop 的同步分两层：本地 `events.md` 作为唯一事实源，
-ICS/CalDAV 作为可选的同步通道。详见 `REF/MD_ICS_BRIDGE.md`。
-
-## How Sync Management Works
-
-### Smart Caching System（⚠️ 历史设计，当前未生效）
-
-> 以下内容描述的是重构前的缓存方案，**当前代码不会写入这些缓存**。
-
-The application implements a local caching mechanism to reduce network requests and improve performance:
-
-1. **Local Storage**: Events are cached in browser's localStorage using Zustand state management
-2. **Cache Expiration**: Cached data expires after 1 hour
-3. **Offline Access**: View cached events even when offline
-4. **Seamless Refresh**: Cache automatically refreshes during sync operations
-5. **Partial Updates**: Individual events can be removed from cache without clearing entire cache
-
-### Sync Strategies
-
-#### 1. Automatic Sync (Timed Intervals)
-
-配置项：`MD_ICS_AUTO_SYNC_MINUTES`（后端 `.env`，单位分钟，`0` 表示仅手动）。
-
-> 注意：旧文档提到的「5/10/30 分钟下拉选择」是 UI 层的 `syncInterval`，
-> 与后端定时器是两套东西。当前 UI 未提供该间隔的可视化配置入口。
-
-#### 2. Manual Sync
-
-日历模块工具栏「推送 CalDAV / 拉取 / 双向同步」三个按钮即时触发。
-
-#### 3. Event-Driven Sync
-
-⚠️ 当前**没有**事件驱动的自动同步。用户创建/修改事件只写 `events.md`，
-需要手动点同步或等后端定时器触发。
-
-#### 4. Immediate Feedback with Background Sync
-
-UI 立即反映本地变更，同步是独立动作，不阻塞界面。
-
-## User Interface
-
-### Bottom Sync Status Bar（⚠️ 当前布局下不可见）
-
-旧版有底部同步状态栏。当前模块化布局（`AppLayout`）为左侧边导航 + 内容区，
-**没有底部状态栏**。同步入口现在在日历模块顶部工具栏。
-
-### Status Indicators
-
-| 状态 | 位置 |
-| ---- | ---- |
-| 同步中 | 工具栏按钮图标旋转 |
-| 上次同步时间 | 工具栏左侧「上次同步 ...」 |
-| 事件总数 | 工作台「数据源」卡片 |
-
-## Configuration Options
-
-### 同步间隔
-
-编辑项目根目录 `.env`：
+## 一句话总览
 
 ```
-MD_ICS_ENABLED=true
-MD_ICS_AUTO_SYNC_MINUTES=5      # >0 启用延时自动同步；0 = 仅手动
-MD_ICS_SYNC_DIRECTION=bidirectional
+                    workspace.md（唯一事实源，本地）
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+     WebDAV 通道（文件原样）        CalDAV 通道（转 ICS）
+              │                           │
+     Nextcloud / 坚果云 / NAS       Radicale / 其他日历服务
 ```
 
-`MD_ICS_SYNC_DIRECTION` 接受 `md-to-caldav` / `caldav-to-md` / `bidirectional`
-（也兼容 `push` / `pull` / `both`），内部经 `normalizeSyncDirection()` 归一化。
+两条通道**都是可选的**。连不上、配错了、服务器关了，本地功能完全不受影响 ——
+服务端启动时不再阻塞等待 CalDAV 探测（先 `listen`，再后台探测）。
 
-> 历史 bug：配置层与同步层曾用两套命名且直接透传，导致按文档填
-> `MD_ICS_SYNC_DIRECTION=md-to-caldav` 时自动同步**静默什么都不做**。已修。
+### 本地优先是硬约束
 
-### Manual Sync
+- 所有编辑（日历 / 看板 / 快速创建 / 设置）只写本地 `workspace.md`
+- 同步状态接口 `/api/caldav/status` **不发网络请求**，服务器关着也能正常显示
+- 同步失败只影响「这一次同步」，不会回滚或阻塞本地操作
+- 读接口（状态 / 日历列表）在服务器不可用时返回 `degraded`，不返回 500
+- 同步接口（push / pull）失败必须明确报错，不能假装成功
 
-在日历页点「推送 CalDAV」/「拉取」/「双向同步」。
+## WebDAV 通道（推荐，已完整可用）
 
-## Troubleshooting
+直接把 `workspace.md` 传到 WebDAV 服务器，**不做任何格式转换**，md 格式跨设备无损。
 
-### 同步没反应
-
-1. 确认 `MD_ICS_ENABLED=true`
-2. 确认 `.env` 中 `CALDAV_ROOT_URL` / `CALDAV_USER` / `CALDAV_PASS` 正确
-3. 看后端日志是否有 `[MD Bridge] 已启用延时自动同步`（仅当间隔 > 0）
-4. 检查 `MD_ICS_SYNC_DIRECTION` 取值是否有效
-
-### 删除没有传播到远端（已知限制）
-
-从 MD 删除事件后同步，**不会删除 CalDAV 远端已存在的 `.ics` 文件**。
-当前 push 只做创建/更新，没有墓碑（tombstone）记录。这是已知遗留问题。
-
-## Technical Implementation
-
-### State Management
-
-`syncStore`（Zustand + persist）当前字段状态：
-
-| 字段 | 状态 |
-| ---- | ---- |
-| `syncInterval` | 持久化，但当前无 UI 消费方 |
-| `lastSyncTime` | 持久化；工作台「上次同步」读它 |
-| `isSyncing` / `syncStatus` / `syncError` | 存在但 `useCalendarEvents` 不更新它们 |
-| `cachedEvents` | **只读空对象**，无人写入 |
-| `cacheTimestamps` | 同上 |
-
-### MD Bridge Sync（当前真实生效）
-
-`events.md` 单一事实源 + ICS 同步通道：
-
-- **首屏数据源**：UI 直接读 `events.md`（`GET /api/md-bridge/events`），不依赖 CalDAV 在线。
-- **同步方式**：
-  - 延时自动同步：`MD_ICS_AUTO_SYNC_MINUTES` 配置后台定时器，触发 `performCaldavSync`。
-  - 手动同步：日历模块顶部「推送 / 拉取 / 双向同步」按钮。
-- **非实时**：ICS 仅在同步时生成，编辑先落 MD。
-- **关联保留**：pull 时 `kanbanTaskId` 不会被远端覆盖 —— `eventToIcs` 写出
-  `X-KANBAN-TASK-ID` 扩展属性，`icsToEvent` 解析回填，pull 合并时优先远程
-  X- 属性、否则回退本地 `kanbanTaskId`。
-
-### 文件导入 / 导出（2026-10-19 新增）
-
-| 接口 | 说明 |
-| ---- | ---- |
-| `POST /api/md-bridge/ics/import` | 导入 `.ics`；`dryRun` 预览、按 uid 去重、`append`/`replace` |
-| `GET /api/md-bridge/ics/export` | 导出单个 `.ics`；`start`/`end` 过滤、`download=1` |
-
-### WebDAV 同步（2026-10-19 已实现）
-
-**为什么需要这条通道**：CalDAV 不是人人都有，但 WebDAV 云盘很普及
-（Nextcloud / ownCloud / 坚果云 / Box）。WebDAV 通道直接同步 md 文件本身，
-**不做 ICS 转换**，因此 md 格式在多设备间完全无损。
-
-配置（项目根目录 `.env`）：
+### 配置（项目根目录 `.env` 或设置界面）
 
 ```
 WEBDAV_URL=https://dav.example.com/remote.php/dav/files/user
 WEBDAV_USER=your_username
 WEBDAV_PASS=your_password
-WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md   # 只取目录部分
+WEBDAV_EVENTS_PATH=CalDAV-Desktop          # 只取目录部分
 WEBDAV_TIMEOUT_MS=20000
 ```
 
-> `WEBDAV_EVENTS_PATH` 的**文件名部分会被忽略**，远端固定使用
-> `events.md` 与 `工作搭子看板.md` 两个文件名。
+> `WEBDAV_EVENTS_PATH` 的**文件名部分会被忽略**（历史遗留的变量名）。
+> 远端固定使用 `workspace.md` 这个文件名。
+> 旧写法 `WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md` 仍可用 —— 目录照样解析成
+> `CalDAV-Desktop`，但文件是 workspace.md。
 
-同步的文件：
+### 数据安全设计
 
-| 文件 | 用途 |
+| 机制 | 说明 |
 | ---- | ---- |
-| `events.md` | 日历事件 |
-| `工作搭子看板.md` | 待办 / 项目 / 速记 |
+| ETag 乐观锁 | push 时比对本地记录的 ETag 与远端当前 ETag；不一致说明别处改过，**返回 conflict 且不覆盖** |
+| 拉取保护 | 远端 ETag 没变就跳过，避免冲掉未同步的本地修改 |
+| 覆盖前备份 | pull 覆盖前把本地文件复制为 `.bak` |
+| 状态记录 | 同目录 `.webdav-state.json` 记各文件上次同步的 ETag 与时间 |
 
-**数据安全设计**：
+冲突时 UI 给三个明确选项：
 
-- **ETag 乐观锁**：push 时比较本地记录的 ETag 与远端当前 ETag。
-  不一致说明远端被其他设备改过，此时返回 `conflict` 而**不覆盖**，
-  UI 提示用户选择「用本地覆盖远端」或「改用远端内容」。
-- **拉取保护**：默认只在远端 ETag 变化时才覆盖本地，
-  避免无意义冲掉未同步的本地修改。
-- **自动备份**：拉取覆盖前把本地文件复制为 `.bak`。
-- **状态记录**：每个 md 同目录下的 `.webdav-state.json` 记录各文件
-  上次同步时的远端 ETag 与时间。
+1. **以本地为准**：force push，用本地文件覆盖远端
+2. **以远端为准**：force pull，用远端文件覆盖本地
+3. **合并双方条目**：按 id 取并集 —— 两边独有的都保留；同一条目用 `updatedAt`
+   较新的一版；时间相同但内容不同 → 保留本地并报告冲突。
+   合并结果两端写同一份；先带 `If-Match` 推远端，成功后才写本地，
+   期间远端又被改则返回 409、本地不动。本地覆盖前备份 `.bak`。
 
-API：
+条目级合并的已知边界：**删除不参与合并** —— 一边删掉的条目会被并集「复活」。
+需要删除时，先合并完，再在两端都删一次。
 
-| 接口 | 说明 |
+### API
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/api/webdav/status` | 配置 + 本地/远端状态 + 上次同步时间 + 远端是否变更 |
+| POST | `/api/webdav/push` | 推送；`files` 限定范围、`force` 强制覆盖 |
+| POST | `/api/webdav/pull` | 拉取；`force` 强制覆盖本地 |
+| POST | `/api/webdav/merge` | 条目级合并（冲突三选一里的「合并」） |
+| POST | `/api/webdav/test` | 连通性与认证测试 |
+
+`files` 的取值当前只有一个：`["workspace"]`（旧值 `events` / `kanban` 已在 P3 删除，
+传了会被当成未知 key）。**不传 = 全部**。
+
+### 实现说明
+
+只用 Node 内置 `fetch` + `PROPFIND` / `MKCOL` / `PUT` / `GET` / `HEAD`，
+不引第三方 WebDAV 库 —— 坚果云等服务商对第三方库的兼容性参差，直接发原始请求最稳。
+实现文件：`apps/server/src/routes/webdav.ts`（前端面板在日历页工具栏「WebDAV」）。
+
+## CalDAV 通道（已切到 workspace.md）
+
+### 它做什么
+
+把 `workspace.md` 里**有 `start` 的条目**转成 VEVENT，逐对象推到日历服务器；
+拉取时反过来，把远端事件合并回同一个文件。
+
+```
+workspace.md 条目  ──ics-convert──▶  单个 VEVENT  ──PUT──▶  CalDAV
+      ▲                                                       │
+      └──────────── 合并（保留 uid / 本地字段）◀──GET─────────┘
+```
+
+实现：`apps/server/src/caldav-sync.ts`（同步引擎）+ `routes/caldav-sync.ts`（HTTP）。
+前端入口在日历页工具栏（推送 CalDAV / 拉取 / 双向同步）。
+旧 `/api/md-bridge/sync/caldav` 已在 P3 随双文件架构一起删除（D19/D29）。
+
+### 关键机制
+
+| 机制 | 说明 |
 | ---- | ---- |
-| `GET /api/webdav/status` | 配置 + 双文件本地/远端状态 + 上次同步时间 + 远端是否变更 |
-| `POST /api/webdav/push` | 推送；`files` 限定范围、`force` 强制覆盖 |
-| `POST /api/webdav/pull` | 拉取；`force` 强制覆盖本地 |
-| `POST /api/webdav/test` | 连通性与认证测试 |
+| UID 落盘 | 拉来的事件把远端 UID 写进条目 `uid`。否则本地改完推回去会在服务器上**新建**，手机日历里出现重复日程 |
+| 逐对象 ETag | PROPFIND 拿 href + ETag；ETag 与状态文件一致的对象**不下载**（增量拉取） |
+| 字段指纹 | 状态文件记录上次同步时参与同步的字段（标题/时间/标签/优先级…）的指纹，用来判断「本地改没改」 |
+| 乐观锁 | 推送带 `If-Match`；远端在同步间隙被别的设备改过 → 412，转为冲突而不是覆盖 |
+| 冲突不静默 | 两边都改过时**保留本地**并返回 `conflicts[]`，界面给三个按钮：以远端为准 / 以本地为准 / **字段级合并**；force 只作用于这批 UID，不会连带覆盖其它条目 |
+| 字段级合并 | 逐字段三方比较：只有远端改的用远端，只有本地改的保留，两边都改的保留本地并在 `merged[].conflictFields` 里列出字段名；合并结果再推回远端 |
+| 跳过例外实例 | `RECURRENCE-ID` 的例外实例不参与合并（会把主事件改成「只剩一天」） |
+| 状态文件 | 与 workspace.md 同目录的 `.caldav-sync-state.json`（不进 git；丢了只是下次全量重拉，不会丢数据） |
+| 并发保护 | 手动同步与自动同步撞车时复用同一个 Promise，不会重复 PUT |
 
-UI：日历页工具栏「WebDAV」按钮 → 同步面板（文件状态列表、测试连接、
-推送/拉取、冲突提示）。
+### 配置
 
-> 实现只用 Node 内置 fetch，不引第三方 WebDAV 库 ——
-> 坚果云等服务商对第三方库的兼容性参差，直接用 `PROPFIND`/`MKCOL`/`PUT`
-> + Basic 认证最稳。
+```
+CALDAV_ROOT_URL=https://your-server/
+CALDAV_USER=your_username
+CALDAV_PASS=your_password
+CALDAV_CALENDAR_URL=            # 可选；留空 = 自动发现第一个日历
+CALDAV_TIMEOUT_MS=15000
+MD_ICS_SYNC_DIRECTION=bidirectional   # push | pull | bidirectional
+MD_ICS_AUTO_SYNC_MINUTES=0            # 0 = 仅手动
+```
 
-### 独立可用性
+`MD_ICS_SYNC_DIRECTION` 还兼容 `md-to-caldav` / `caldav-to-md` / `both` 旧写法，
+内部经 `normalizeDirection()` 归一化。
 
-服务端不再因 CalDAV 连接失败而 `process.exit(1)`。
-`initializeClient()` 内部已捕获错误返回空数组；此前 start() 里额外
-`exit(1)` 会导致「只有 md + WebDAV、没有 CalDAV」的用户完全无法启动服务。
+> `MD_ICS_ENABLED` 不再被读取：自动同步只看 `MD_ICS_AUTO_SYNC_MINUTES`
+> （> 0 才启用）。旧配置留着也不会报错。
+
+设置界面「同步 → CalDAV」可直接填地址 / 账号 / 日历 URL；点「读取日历列表」
+从服务器拉取日历供选择。改完立即生效（`config.json` 优先于环境变量）。
+
+### 自动同步
+
+`MD_ICS_AUTO_SYNC_MINUTES > 0` 时，进程内每 60 秒检查一次「距上次自动同步
+是否已超过配置间隔」，超过才真正同步。所以**改间隔不用重启**；设为 0 等于关闭。
+同步在后台执行，失败只写日志，不影响本地使用。
+
+### API
+
+| 方法 | 路径 | 说明 |
+| ---- | ---- | ---- |
+| GET | `/api/caldav/status` | 配置 + 上次同步 + 待推送条数（**不发网络请求**） |
+| GET | `/api/caldav/calendars` | 日历列表（服务器不可用时 200 + `degraded`；自动发现失败但配了 `CALDAV_CALENDAR_URL` 时退回该 URL） |
+| POST | `/api/caldav/sync` | `{ direction, calendarUrl, force, uids }`；有冲突/失败返回 207；`uids` 用于逐条解决冲突 |
+| POST | `/api/caldav/test` | 连通性测试（PROPFIND，不写数据） |
+
+### 当前边界（明确不做）
+
+- **删除不传播**：没有墓碑记录。别人在远端删了事件，本地条目会保留；
+  本地删了条目，远端对象也留着。自动删数据风险太大，宁可手动清理。
+- **只同步 VEVENT**：有 `start` 的条目。纯截止日期的任务（VTODO）暂不推。
+- **不合并重复事件的例外**：`RECURRENCE-ID` 跳过（宁可少一条例外，也不破坏主事件）；
+  如果远端对象是一个「主事件 + 例外实例」的合集，覆盖它时例外实例会丢失。
+- **合并是字段级的，不是内容级的**：两边改同一字段时保留本地，只报告字段名，
+  不会把「本地标题 + 远端标题」拼成一个奇怪的字符串。
+
+## 配置项速查
+
+| 变量 | 默认 | 作用 |
+| ---- | ---- | ---- |
+| `WORKSPACE_FILE` | `./workspace.md` | 统一数据源路径（**环境变量优先于 config.json**） |
+| `CALDAV_ROOT_URL` / `CALDAV_URL` | 空 | CalDAV 根地址 |
+| `CALDAV_USER` / `CALDAV_PASS` | 空 | CalDAV 凭据 |
+| `CALDAV_CALENDAR_URL` | 空 | 目标日历 URL；留空自动发现第一个 |
+| `CALDAV_TIMEOUT_MS` | `15000` | 单次 CalDAV 请求超时 |
+| `MD_ICS_SYNC_DIRECTION` | `bidirectional` | 同步方向（push / pull / bidirectional） |
+| `MD_ICS_AUTO_SYNC_MINUTES` | `0` | 自动同步间隔，0 = 仅手动 |
+| `WEBDAV_URL` | 空 | WebDAV 地址；填了就启用该通道 |
+| `WEBDAV_USER` / `WEBDAV_PASS` | 空 | WebDAV 凭据（坚果云强制应用密码） |
+| `WEBDAV_EVENTS_PATH` | `CalDAV-Desktop` | 远端目录（文件名部分忽略） |
+
+配置优先级：`config.json`（设置界面写入） > 环境变量 > `.env` > 代码默认值。
+**路径类例外**：`WORKSPACE_FILE` 等以环境变量优先（容器部署习惯）。
+
+## 联网自检（服务器就绪后）
+
+```bash
+# 1) 先启动后端
+cd apps/server && pnpm dev
+
+# 2) 另开终端：只读自检（status / 日历列表 / 连通性）
+node scripts/verify-caldav-live.mjs
+#    或指定地址：node scripts/verify-caldav-live.mjs --base http://127.0.0.1:3001
+```
+
+脚本会打印：是否已配置、目标日历、待推送条数、自动发现是否成功、连接耗时。
+**它不会 push / pull 任何条目**，也不会改 workspace.md。
+
+真实写入验证按脚本结尾的 4 步手工做：新建「同步自检」→ 推送 → 手机确认 → 拉取 → 删除。
+
+## 排障
+
+### WebDAV 推送 / 拉取没反应
+
+1. `/api/webdav/status` 返回 `configured: false` → `WEBDAV_URL` 没读到（改完要重启后端）
+2. 401 → 用「测试连接」确认；坚果云必须用**应用专属密码**，不是登录密码
+3. 坚果云常见：`PROPFIND` 返回 404 → 远端目录写错，或未先 `MKCOL`（推送会自动建目录）
+4. `conflict: true` → 远端被别的设备改过，选一边覆盖，别盲目 force
+
+### 日历页「推送 CalDAV」报错 / 没反应
+
+1. `GET /api/caldav/status` 看 `configured` / `calendarUrl`；
+   `configured: false` 说明地址或账号没读到
+2. 502 + 「本地数据不受影响」→ 服务器连不上（地址、端口、证书、Tailscale 断线）
+3. 401 / 403 → 用「设置 → 同步 → 测试 CalDAV 连接」确认账号密码
+4. 404 → 日历 URL 不对。Radicale 形如 `http://host:5232/<user>/<collection>/`，**要带末尾 /**
+5. 结果里出现 `conflicts` → 两边都改过。看清两条内容再选「以远端为准」或「以本地为准」
+6. 手机日历里出现重复 → 检查 `workspace.md` 里条目是否带 `uid`。
+   删掉 `.caldav-sync-state.json` 只会让下次全量重拉，不会丢数据
+
+### 数据文件到底在哪
+
+```
+curl http://localhost:3001/api/workspace/info
+```
+
+返回实际绝对路径。不要靠猜。
+
+## 已废弃的东西（别再找）
+
+| 旧设计 | 现状 |
+| ------ | ---- |
+| `syncStore.cachedEvents` 本地缓存、1 小时过期、离线读缓存 | 无人写入的空对象；数据一律直读 workspace.md |
+| 底部状态栏同步按钮 | 布局改为左侧导航，无底部状态栏；同步入口在日历页工具栏 |
+| 事件驱动自动同步 | 从未实现（现在的自动同步是服务端定时器） |
+| 双文件同步（`events.md` + `工作搭子看板.md`） | 已合并为 `workspace.md`，只同步一个文件；旧路由已删除 |
+| `kanbanTaskId` / `日历:<uid>` 双向绑定 | 随双文件架构一起拆掉；同一份数据不需要绑定 |
+| `/api/md-bridge/sync/caldav` + `MD_ICS_ENABLED` | 路由与配置项已删除（P3）；同步走 `/api/caldav/sync` |
 
 ## Known Gaps
 
-- **删除不同步到远端**（缺墓碑记录）：从 MD 删除事件后同步，
-  CalDAV 远端已存在的 `.ics` 不会被删除
-- WebDAV 通道**检测到冲突只提示，不做自动三方合并**，需用户选一边
-- 增量同步未实现：目前按全量 events 遍历，未做 `updated` 级增量
-- CalDAV 通道的冲突检测仅为基于 `updated` 的基础版（WebDAV 通道用 ETag 较可靠）
-- localStorage 缓存层形同虚设，可考虑移除或重新接线
-- 各 WebDAV 服务商对 `PROPFIND` / `MKCOL` / `If-Match` 支持程度有差异，
-  首次接入建议先用「测试连接」确认
-
-## 相关功能
-
-- **自然语言快速创建**（`/api/nlp/*`）：本地中文规则解析作快速路径，
-  AI 作增强通道。详见 `docs/UPDATE_LOG.md` 与 `.env` 注释
-- **iCalendar 导入导出**（`/api/md-bridge/ics/*`）
+- CalDAV 删除不传播（无墓碑）：本地 / 远端删除都需要手动清理
+- CalDAV 只同步 VEVENT，纯截止日期任务（VTODO）未同步
+- 重复事件的例外实例（RECURRENCE-ID）不合并
+- 各 WebDAV 服务商对 `PROPFIND` / `MKCOL` / `If-Match` 支持有差异，
+  首次接入先用「测试连接」
 
 ---
 
-**Last Updated**: 2026-10-19（校正缓存方案描述失真，新增导入导出与已知问题章节）
-**Related Docs**: [README.md](../README.md), [CHANGELOG.md](CHANGELOG.md), [TESTING.md](TESTING.md), [../REF/MD_ICS_BRIDGE.md](../REF/MD_ICS_BRIDGE.md)
+**Last Updated**: 2026-11-02（CalDAV 通道切换到 workspace.md：uid / ETag 增量 / 冲突 / 自动同步）
+**Related**: [../REF/DATA_SOURCE.md](../REF/DATA_SOURCE.md)、[../REF/MD_ICS_BRIDGE.md](../REF/MD_ICS_BRIDGE.md)、[TESTING.md](TESTING.md)

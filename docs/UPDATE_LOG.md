@@ -2,6 +2,769 @@
 
 这个文件记录了项目的持续更新和改进。每次更新都应该在这个文件中添加相关信息，而不是创建新的更新日志文件。
 
+## 2026-11-05（真实 WebDAV 实测：修掉「每次推送都误报冲突」的 ETag 缺陷 + 审计四项收口）
+
+用户给了一个真实的 WebDAV 账号（某 OneDrive/SharePoint 风格的网盘网关），第一次在**真机**上跑同步链路。
+全部测试都在隔离远端目录里做，测完 DELETE 清理，没碰用户真实数据。
+
+### 抓到的真问题：PUT 与 HEAD 的 ETag 属于两套命名空间 → 每次 push 都误报冲突
+
+- 现象：隔离 harness 16 项断言里 2 项红——
+  `PUT 返回 ETag 与 status HEAD ETag 一致` 拿到
+  `{"etagPush":"<短哈希>","etagStatus":"{<GUID>,1}"}`；
+  `二次 push 不误报冲突` 直接 `conflict: true`。
+- 根因：这类网关 `PUT` 响应头给短哈希 ETag，`HEAD`/`GET`（经 302 跳到
+  某微软个人网盘域名）给 `{GUID},N` 格式。`putRemoteFile()` 把 PUT 的 ETag
+  存进 `.webdav-state.json`，下次 push 用 `statRemoteFile()` 的 ETag 去比，永不相等 →
+  **每次推送都被判成「远端已被其他设备修改」，用户必须手动 force**。
+  mock 单测里 PUT 与 HEAD 的 ETag 同源，所以一直抓不到。
+- 修复：`apps/server/src/webdav.ts` 的 `putRemoteFile()` 在 PUT 成功后**不信任响应头 ETag**，
+  改为回读一次 `statRemoteFile()` 拿规范 ETag；回读失败才退回 PUT 的 ETag。
+  「记录的基线」与「比较用的值」从此同源。
+- 已验证该网关的读取 ETag 确实随内容变化（连续三次 PUT 得到三个不同 GUID），
+  所以冲突检测在这个后端仍然有效。
+- 回归测试：`webdav-sync.test.ts` 的 mock 增加 `divergentPutEtag` 开关，新增 2 项
+  （基线与 HEAD 同源、真改动仍能检出冲突），该文件 23 → 25 项。
+- 真机复验：harness 从 14 PASS / 2 FAIL 变为 **16 PASS / 0 FAIL**。
+
+### 审计四项收口
+
+1. **验收脚本失效** → 两个 e2e 脚本改为读 `VERIFY_TOKEN`/`API_TOKEN` 并带 `Bearer`，
+   `VERIFY_BASE_URL` 可覆盖；新增 `scripts/run-e2e.sh` 起隔离服务
+   （临时 `WORKSPACE_FILE` / `config.json` / 随机 token，CalDAV 指向必然连不上的地址），
+   并修掉补丁引入的 `parse()` 未 await Promise 的 bug。结果 **92 + 32 全通过**。
+2. **恢复逃生口只有 API 没 UI** → `BackupPanel` 的「同步已暂停」横幅与同步中心都加了
+   「放弃本次恢复」（`abortRestore()`），带二次确认；新增 4 个 i18n 键（中英对齐）；
+   `sync-center.test.tsx` 新增 2 项（点击调用、取消不调用），5 → 7 项。
+3. **`docs/MODULE_STATUS.md` 过时** → 同步中心从 `planned` 改 `stable`，
+   补 `sync-overview.test.ts`（10）；ICS 计数修正 28/15 → 29/16；WebDAV 行补 ETag 说明。
+4. **CI 不含打包产物/验收** → 新增 `e2e` job（build server + `bash scripts/run-e2e.sh`）；
+   产物路径 `apps/desktop/dist-electron/` 改为 `dist-server/`（`pnpm build` 只跑 esbuild，
+   不跑 electron-builder，原路径永远不存在）。
+
+### 验证
+
+- server：`tsc --noEmit` 0 错误；**20 文件 / 444 通过 / 0 skip**。
+- renderer：`tsc --noEmit` 0 错误；**13 文件 / 115 通过**。
+- 双端 `build` 通过；产物内无 `localhost:3001`。
+- `bash scripts/run-e2e.sh`：92 + 32 全通过。
+- 真实 WebDAV（用户提供的网盘网关，隔离目录）：16/16 通过，清理 204。
+
+## 2026-11-03（P9：v0.3.0 发布收尾——版本号、升级演练、Docker 烟测）
+
+P9 是「能不能真的发出去」的检验。这一轮抓到一个**只有跑 `dist/` 才会暴露**的启动崩溃，
+说明前面的测试全绿不代表打包后能跑。
+
+### 抓到的真问题：`rrule` 在 ESM 下启动即崩
+
+- 症状：`node apps/server/dist/index.js` 直接
+  `SyntaxError: The requested module 'rrule' does not provide an export named 'RRule'`，
+  服务根本起不来。而 `vitest` 跑 `recurrence.test.ts` 30 项全绿。
+- 原因：`rrule@2.8.1` 是 CJS 包（webpack UMD 产物），`package.json` 里 `main` 指向
+  `dist/es5/rrule.js`；我们 `"type": "module"` + `import { RRule } from "rrule"`
+  在 Node 原生 ESM 下拿不到具名导出。vitest 会把依赖预打包成 ESM，所以测试发现不了。
+- 修复：改成 `import rrulePkg from "rrule"; const { RRule } = rrulePkg;`，
+  类型仍用 `import type { Options }`。`typecheck` + `build` + 升级演练全部复验通过。
+- 教训（已写进测试文档口径）：**凡是新增 CJS 依赖，必须用 `node dist/index.js` 起一次真服务**，
+  不能只看 vitest。
+
+### 版本号与元数据
+
+- 根 `package.json`、`apps/server`、`apps/renderer`、`apps/desktop` 统一 `0.3.0`。
+- `apps/desktop/package.json` 补 `description` / `author`（消除 electron-builder 的两条警告）。
+
+### 升级演练（v0.2.x → v0.3.0，脚本 `scripts/upgrade-drill.sh` 手动执行版）
+
+用一份「v0.2.x 风格」数据（无 `uid`、无 `remind`、frontmatter 带自定义字段、故意夹一个缺 `id` 的坏块），
+以 `WORKSPACE_FILE` 指向它、**不带任何 token** 启动 `dist/index.js`：
+
+- 启动自动生成 `api-token.txt`（权限 `-rw-------`，长度 64）；不需要任何迁移步骤；
+- `GET /api/workspace/items` 无 token → **401**；
+- 带 token → 200，**坏块被跳过、两条好条目照常读出**（`count: 2`，`notes` 里列出 16 条诊断）；
+- `/%61pi/workspace/items` → **400**（编码绕过被拦），`/API/workspace/items` → **401**；
+- 写入一条后，frontmatter 里的 `myCustomField: keep-me` **仍在**（round-trip 保真）；
+- `GET /api/sync/overview` 正常返回，`events`/`conflicts` 为空也不报错。
+
+演练中顺便修掉了演练脚本自身的一个错误假设（`priority` 只接受 `high|mid|low`，我一开始写了 `2`），
+这也提示：外部/历史数据里若出现非法 `priority`，解析会记一条错误而不是整份失败。
+
+### Docker
+
+- 构建参数收敛：`pnpm install` 加 `--network-concurrency=4 --fetch-timeout=180000 --fetch-retries=5`，
+  build 阶段加 `--filter caldav-server... --filter caldav-renderer...`（不装根目录测试工具，少下 100+ 包）。
+- 本机 Docker 没有 `buildx` 插件（`docker buildx` → unknown command，`DOCKER_BUILDKIT=1` 报
+  "buildx component is missing"），所以 `--mount=type=cache` 方案不可用，已回退为普通层缓存；
+  该限制写进了部署文档的排查小节。
+- 镜像构建成功（40 步，`caldav-desktop:p9`）；中途若干 `ETIMEDOUT` 由 pnpm 自身重试救回。
+
+### 容器烟测：抓到一个真实缺陷（`workspace.md` 权限）
+
+`docker run -d -p 3999:3001 -v /tmp/cd-data:/data caldav-desktop:p9` 后逐项验证：
+
+| 检查 | 结果 |
+| --- | --- |
+| `/health` | 200 `{"status":"ok","version":"dev"}` |
+| `/`（前端） | 200 `text/html`，`STATIC_DIR` 生效 |
+| 无 token `/api/workspace/items` | **401** |
+| 带 token 读 / 写 | 200 / 建任务成功 |
+| `/api/sync/overview` | 正常，未配置时 `events`/`conflicts` 为空也不报错 |
+| 数据卷持久化 | `api-token.txt` + `workspace.md` 都在 `data/` |
+| CalDAV 连不上 | 只告警不退出（离线优先） |
+
+**但 `workspace.md` 是 `0600`、属主是容器内 uid 100，宿主机用户 `head` 直接 `Permission denied`。**
+这是真缺陷不是小瑕疵：`workspace.md` 就是唯一事实源，用户随时要用 vim / Obsidian / VS Code
+打开它改两行——只有容器能读，等于把「本地优先」的产品前提废掉了。
+
+根因：`storage-check.ts` 的 `atomicWriteFile` 把所有落盘文件都写成 `0600`，
+而它同时服务于 token（该 0600）和 workspace / 备份 / 恢复（该 0644）。
+
+修复：
+
+- `atomicWriteFile(filePath, content, mode = 0o600)` 新增第三参数，rename 前显式 `chmod`
+  （`openSync` 的 mode 会被 umask 削减）；
+- `workspace-store.ts` / `restore.ts` 覆盖 workspace 时传 `0o644`，`backups.ts` 落备份也 `0o644`；
+- `auth.ts` 的 token 保持默认 `0600`；
+- **运行用户改为复用 `node:22-alpine` 自带的 `node` 用户（uid/gid 都是 1000）**，
+  1000 正好是绝大多数 Linux 桌面发行版的默认首个用户，bind mount 的 `data/`
+  宿主机天然可读写。踩坑记录：先试 `addgroup -g 100` 报 `gid '100' in use`
+  （alpine 自带 `users` 组），再试 `-g 1000` 又报 `gid '1000' in use`
+  （node 镜像里已属于 node 用户）——所以别新建用户，直接复用；
+- `docker-entrypoint.sh` 支持 `PUID` / `PGID` 覆盖（默认 1000 / 1000），
+  并且只在 `node` 用户确实写不了 `/data` 时才 `chown -R`，避免备份多时每次启动递归改属主；
+- `docker-compose.yml` 显式传 `PUID` / `PGID`。
+
+复测（`caldav-desktop:p9c`，容器内 uid 1000 = 宿主机 `atdoc`）：
+
+```
+-rw------- 1 atdoc atdoc  65 api-token.txt     ← 密钥，保持 0600
+-rw-r--r-- 1 atdoc atdoc 188 workspace.md      ← 唯一事实源，0644 可读
+宿主机 read  → 正常读到 frontmatter
+宿主机 write → WRITE_OK
+写完后再读接口 → 条目仍在，后端没被搞坏
+```
+
+`pnpm -C apps/server test` 修改后仍 **442 通过**（`atomicWriteFile` 默认值没变，
+`auth.test.ts` 里 `0600` 的断言依然成立）。
+
+### 文档
+
+- `README.md`：version badge → 0.3.0，Roadmap 增加「v0.3.0（2026-11-03，已完成）」小节并清掉过期的 v0.2.5 行。
+- `docs/CHANGELOG.md`：新增 `[0.3.0] - 2026-11-03` 完整条目（数据安全 / 备份恢复 / 认证 / 桌面部署 / 同步中心 / 测试 / 升级）。
+- `docs/DEPLOYMENT.md`：补访问令牌获取（`docker compose exec -u root ... cat /data/api-token.txt`）、
+  只读挂载与 `ALLOW_UNSAFE_FS=1`、升级与回滚说明。
+- `docs/planning/README.md`：P9 勾选，状态改为「**v0.3.0 实现完毕，待打 tag**」。
+
+### 测试
+
+后端 **442 通过（20 文件，0 跳过）**，前端 **113 通过（13 文件）**；双端 `typecheck` / `build` 通过，
+`apps/desktop` 的 esbuild 产物 2.03 MB。
+
+## 2026-11-03（P8：同步中心只读概览 + 事件/冲突环形缓冲）
+
+P8 是「看得见同步状态」这一步：不改任何同步算法，只把已有状态**只读地**汇总成一个页面。
+关键是**离线优先**——没配同步也完全不影响本地使用，进入同步中心只会看到引导，不会阻塞任何操作；
+概览接口**不发任何网络请求**，所以断网时页面照样能打开、能看清上次同步结果和错误。
+
+### 服务端
+
+- 新增 `apps/server/src/sync-overview.ts`：`getSyncOverview()` 汇总 CalDAV（配置/日历/上次同步/本地/待推/已同步/最近错误）、
+  WebDAV（配置/远端目录/上次同步/ETag/最近错误）、事件环、冲突环、`restorePending`、`autoSyncSuspended`、
+  `maintenance`、`inFlight{caldav,webdav,restore}`。
+  - **绝不联网**：WebDAV 侧只读本地 `.webdav-state.json`（刻意不复用 `routes/webdav.ts` 里会 HEAD 远端的 `GET /status`）；
+    CalDAV 侧只读 `.caldav-sync-state.json` 与配置。
+  - 全部 try/catch 降级：任何状态文件损坏或配置缺失都返回「未配置/无数据」，不抛错、不影响页面渲染。
+  - `webdavDirName()` 把配置里的目录（`CalDAV-Desktop`）与旧的整文件路径（`.../events.md`）都归一成目录名。
+- `apps/server/src/sync-control.ts` 增加两个进程内环形缓冲（各 20 条，重启清空）：`recordSyncEvent(channel, kind, message)`
+  与 `recordSyncConflict({channel, localId, remoteHref, localHash, remoteEtag, summary})`，消息超 500 字符截断。
+- `apps/server/src/routes/sync-control.ts` 新增 `GET /api/sync/overview`（与会话内其它接口一样走 token 认证）。
+- 记录点接入：CalDAV 的拉取冲突（本地与远端都改过）、推送 412 冲突、每次同步结束的摘要与逐条错误；
+  WebDAV 的 push 冲突、push/pull 摘要与逐条错误、merge 冲突与合并统计。
+
+### 前端
+
+- 新增 `apps/renderer/src/modules/sync/index.tsx`（替换原来的 git-sync 占位模块，导航名「同步中心」，order 3）：
+  - 两张通道卡片：已配置显示字段与最近状态；未配置显示「未配置不影响本地使用」并给出设置入口。
+  - 恢复挂起 / 同步暂停时顶部出现琥珀色提示与三个方向按钮（以云端为准 / 以本地为准 / 双向合并）。
+  - 冲突区（琥珀色）明确写出「不会自动覆盖」，事件区倒序显示最近 20 条并注明重启清空。
+  - 进页面只拉一次 + 手动刷新，不轮询（离线时不会刷屏报错）。
+- 新增 `apps/renderer/src/api/sync.ts`：`fetchSyncOverview()`、`resumeSync(action)`。
+- i18n：zh-CN / en-US 各新增约 48 个 `syncCenter.*` 键，key 集合完全一致。
+
+### 测试
+
+- 新增 `apps/server/src/__tests__/sync-overview.test.ts`（10 项）：未配置返回、配置不可达地址也 2 秒内返回（证明不联网）、
+  事件环 25→20、冲突环 23→20、超长消息截断、`lastError` 取最近错误、`inFlight` 归零、reset 清空、
+  维护态可见、恢复 marker 让 `restorePending` 为真。
+- 新增 `apps/renderer/src/__tests__/sync-center.test.tsx`（5 项）：未配置引导、已配置字段、冲突/事件分区、
+  恢复挂起三按钮（点击触发 `resumeSync("pull")`）、加载失败不白屏。
+- 结果：后端 **442 通过（20 文件，0 跳过）**，前端 **113 通过（13 文件）**；双端 `typecheck` 与 `build` 通过，
+  构建产物不含 `localhost:3001`。
+
+### 下一步
+
+P9：发布收尾——Docker 镜像烟测、升级演练（v0.2.x → v0.3.0 数据兼容）、版本号与 tag。
+
+## 2026-11-03（P7：备份恢复状态机 + 恢复后同步方向选择）
+
+P7 把「手工覆盖 workspace.md」变成有状态机保护的一键恢复。恢复是唯一会**整份替换**数据文件的操作，所以流程刻意做得很重。
+
+### 服务端（`apps/server/src/restore.ts`）
+
+- 状态文件：`.restore-state.json`（phase/file/sha256/epoch/error）与 `.sync-suspended.json`（恢复后同步暂停标记）。
+- `POST /api/workspace/backups/restore`：必须 `confirm: true` + 预览时拿到的 `sha256`；服务端重新计算并比对（防预览与写入之间换文件）。
+- 恢复前校验：解析备份 → 至少一条可解析 → `validateWorkspaceGraph(includeHistorical)`；坏备份直接 400，不动当前文件。
+- 执行顺序：`invalidateSyncEpoch` → `setSyncMaintenance(true)` → 停 CalDAV 自动同步 → 暂停提醒调度并**等待本轮 tick 结束** → `waitForInFlightSync(10s)`（CalDAV + WebDAV + reminder）→ 固定快照（防 24h TTL 清掉，重试仍可用）→ pre-restore 备份（失败即中止）→ 持锁原子写 + 重置 CalDAV/WebDAV 基线 + 按新数据裁剪 `sent` + 写暂停标记 → 清 marker、解除冻结、重启提醒调度。
+- 失败时保留 marker + maintenance，返回 503；`POST /api/workspace/backups/restore/abort` 可放弃（工作区保持现状、同步仍暂停）。
+- 启动自愈 `recoverRestoreOnStartup()`：有 marker 且固定快照仍在 → 保持冻结并跳过定时器；快照已失效 → 自动解除冻结（否则用户永远 503）。
+- `POST /api/sync/resume`：`pull | push | bidirectional`，清暂停标记、作废纪元、按选择跑一次同步；未配置 CalDAV 时只解除暂停不发请求。
+- `isSyncSuspended()` 接入 CalDAV 手动同步与 WebDAV push/pull/merge（409 `SYNC_SUSPENDED`）；WebDAV 三个写路由用 `res.once("close")` 登记在途活动，恢复会等它们结束。
+- 提醒调度：每轮登记 `beginSyncActivity("reminder")`；写回 `sent` 前检查 epoch/maintenance，避免恢复重置后又被旧状态覆盖。
+
+### 前端
+
+- `api/backups.ts` 增加 `getRestoreStatus / restoreBackup / resumeSync`。
+- `BackupPanel` 每行新增「恢复」按钮：`window.confirm` 二次确认 → 重新预览取 sha → 调恢复；完成后顶部出现琥珀色「同步已暂停」面板，提供「拉取云端 / 推送本地 / 双向合并」三选一，并显示本次恢复的条数。
+- i18n 中英文同步新增 11 个 key（`backup.restore*`、`backup.syncSuspended*`、`backup.resume_*`）。
+
+### 验证
+
+- `apps/server/src/__tests__/restore.test.ts` 14 项：正常恢复、sha 不匹配、坏备份、缺 confirm、abort、resume 非法/未暂停/成功、维护期写入被拒、drain 超时保留 marker、启动自愈两条路径、提醒 sent 裁剪。
+- 全量：server **19 文件 / 432 通过 / 0 skip**；renderer **12 文件 / 108 通过**；两端 `tsc --noEmit` 0 错误。
+
+## 2026-11-03（P6：Electron 打包——本机 HTTP 后端 + 主进程注入 token）
+
+P6 把桌面端从「file:// 打开静态页 + 假设 3001 有服务」改成**自带后端、随机端口、同源 HTTP**。
+
+### 主进程（`apps/desktop/main.ts`）
+
+- 生产模式不再 `loadFile`（file:// 是 null origin，CORS/鉴权都不成立）：
+  先 `listen(0)` 拿一个空闲端口（重试 3 次），再 fork 打包进 `resources/server/index.cjs`
+  的后端，最后 `loadURL("http://127.0.0.1:<port>")`。
+- 后端环境：`ELECTRON_RUN_AS_NODE=1`、`execPath=process.execPath`（不要求用户装 Node）、
+  `PORT`、`HOST=127.0.0.1`、`API_TOKEN`、`WORKSPACE_FILE=<userData>/workspace.md`、
+  `STATIC_DIR=<resources>/renderer`、`PLUGINS_DIR=<resources>/plugins`、`APP_VERSION`。
+- token 由主进程 `ensureToken()` 生成/读取 `<userData>/api-token.txt`（`0600`），
+  **只存在于主进程**；`webRequest.onBeforeSendHeaders` 仅对 `http://127.0.0.1:<port>/*`
+  注入 `Authorization: Bearer …`。渲染进程拿不到 token，也不写 localStorage。
+- 启动顺序：fork 后端 → 每 100ms 探 `/health`（最长 15s）→ 成功才建窗口；
+  失败弹 `dialog.showErrorBox` 而不是留一个白窗口；退出/`before-quit` 杀子进程。
+- 开发模式（未打包）仍连 `localhost:5173`，后端各自跑，保持原 `pnpm dev` 体验。
+- `preload.ts` 只暴露 `__DSH_ELECTRON__` 与 `__API_BASE_URL__`（从 `--dsh-api-base=` 读，
+  同源兜底），不再暴露任何 Node 能力。
+
+### 打包
+
+- 新增 `apps/desktop/build-bundle.mjs`：esbuild 把 `apps/server/src/index.ts` 打成
+  单文件 `dist-server/index.cjs`（CJS / node18 / 2.0MB）。理由：pnpm 的 node_modules
+  符号链接结构复制进 Electron 经常缺依赖，单文件没有路径解析问题。
+- 为此修掉两处 `import.meta.url` 推导（`apps/server/src/config.ts`、`routes/plugins.ts`）：
+  改成 `typeof __dirname === "string" ? __dirname : process.cwd()`，同时兼容 ESM 开发与 CJS 打包。
+- `electron-builder.config.json` 增加 `extraResources`：`dist-server → server`、
+  `../renderer/dist → renderer`、`../renderer/plugins → plugins`。
+- `package.json` 的 `build` 现在包含 `build:server`；新增 devDependency `esbuild@^0.25.0`。
+- `/health` 增加 `version`（来自 `APP_VERSION`），供设置页显示。
+
+### 验证
+
+- `npx tsc --noEmit`（desktop）0 错误；`node build-bundle.mjs` 无警告。
+- `electron-builder --dir` 成功产出 `dist-electron/linux-unpacked`，其中
+  `resources/server/index.cjs`、`resources/renderer/index.html`、`resources/plugins/example.json`
+  均在位；`app.asar` 内含 `dist/main.js`、`dist/preload.js`；渲染产物不含 `localhost:3001`。
+- 用打包后的目录起后端（`STATIC_DIR=resources/renderer`）：`/health` 200、`/` 200、
+  `/api/plugins` 正确扫到 `example`、无 token 的 `/api/*` 401。
+- **未做**：无显示环境（无 xvfb），Electron 窗口本身没跑；已列入手工门禁 F10。
+
+## 2026-11-03（P5：单用户认证——服务端 token + 前端 AuthGate + ICS 改 blob）
+
+P5 把「局域网里裸奔的后端」收口成单用户 token 模式（D1/D28）。**默认开启，不存在“忘了配就公开”的状态。**
+
+### 服务端
+
+- 新增 `apps/server/src/auth.ts`：
+  - `resolveApiToken()` 顺序：`API_TOKEN`（`^\S{32,}$`，太短/含空白直接报错）→
+    `API_TOKEN_FILE` 或 `<数据目录>/api-token.txt`（必须 64 位 hex）→ 生成 32 字节随机 token。
+  - 生成时原子写 + `chmod 0600`；已存在的文件若是 `0644` 会自动收紧，失败只警告。
+  - 文件损坏/长度不对：改名 `api-token.invalid-<时间戳>` 后重建，不静默使用坏值。
+  - 目录不可写：退化为“进程内存 token”，启动日志打印一次并明确提示重启即变。
+  - `tokenMatches()` 对两侧都做 sha256 再 `timingSafeEqual`；空串直接 false，
+    避免 `sha256("") === sha256("")` 让 `Bearer ` 通过。
+- `createApp()` 的 `auth` 从 P1 的 `false` 改为 `{token}`；`index.ts` 启动时先解析 token
+  再建 app，`/health` 与静态资源仍公开，其余 `/api/*` 一律 401（顺序由 P1 锁定）。
+- 新增 `auth.test.ts` 9 项：env 优先 / 太短 / 含空白 / 生成 `0600` / 复用不重写 /
+  `0644` 收紧 / 损坏改名重建 / 不可写目录降级内存 token / 空值比较恒 false。
+
+### 前端
+
+- 新增 `api/token.ts`（localStorage `dsh-api-token`，提供 `isElectron()` 与
+  `dsh:auth-required` 事件名）和 `api/client.ts`（`createApiClient(timeout)`，
+  请求拦截器注入 `Authorization: Bearer`，401 广播事件）。
+- 9 处 `axios.create()` 全部换成 `createApiClient()`：workspace / webdav / backups /
+  nlp / calendar / caldav-sync / notifications / 设置页 / 离线横幅。
+  Electron 下不注入（由主进程 `webRequest` 负责，P6），避免 token 进渲染进程。
+- 新增 `components/auth/AuthGate.tsx`：先探 `/api/workspace/info` —— 200 放行、
+  401 显示令牌页、网络错误放行（交给离线横幅，不误报“认证失败”）。
+  令牌页给出 Docker 取 token 命令、输入框、清除、连接；连接前先用候选 token 探测，
+  成功才落盘并刷新。
+- `api/base.ts`：只要注入的 `__API_BASE_URL__` 是字符串就采用（**包括空串**），
+  修掉 Electron 随机端口下回退到构建期 `localhost:3001` 的 B3 bug。
+- ICS 导出从 `window.open` 改为 `downloadIcs()`（axios `responseType: "blob"` →
+  objectURL → `<a download>`），否则带 token 后新窗口必然 401。
+- 新增 `auth-ui.test.tsx` 6 项：token 存取清、client 注入头、AuthGate 200/401/断网。
+
+### 验证
+
+- server：`tsc --noEmit` 0；`vitest` **416 通过（18 文件，0 skip）**；`pnpm build` OK。
+- renderer：`tsc --noEmit` 0；`vitest` **108 通过（12 文件）**；
+  `VITE_API_URL= pnpm build` OK。
+
+### 升级提示
+
+- 老用户升级后第一次访问会看到令牌页。token 在数据目录 `api-token.txt`：
+  `docker compose exec -u root caldav-desktop cat /data/api-token.txt`。
+- 反代必须转发 `Authorization` 头，否则永远 401。
+- 浏览器/PWA 与 Electron 各自保存/注入，互不影响；清除浏览器 localStorage 即可重新输入。
+
+## 2026-11-03（P4：备份只读面板 + 韧性 UI + 第一轮“不重复造轮子”）
+
+P4 只做“出事时能救回来”的那一层，并顺手兑现 D35（优先成熟开源库）。
+
+### 备份只读（v0.2.5 范围）
+
+- 新增 `apps/server/src/backups.ts`：`listBackups` / `previewBackup` /
+  `readBackupForExport`。列表按文件名倒序，坏备份的 `itemCount` 为 `null`
+  而不是 0（“读不出来”和“空文件”必须能区分）；预览计算 sha256 并把备份
+  固定在 `.workspace-backups/.pinned/` 24 小时，避免恢复前被轮转清掉；
+  只读环境下只预览不固定。
+- 新增 `apps/server/src/routes/backups.ts`：`GET /api/workspace/backups`、
+  `POST /preview`、`GET /export`。**没有写接口**——恢复要等 P7 的认证与状态机。
+- 备份轮转从 10 份提升到 20 份 / 50 MB；文件名加 6 位随机后缀，解决同一毫秒
+  连续写入互相覆盖的问题。
+- 前端新增“设置 → 数据文件 → 本地备份”面板：列表、条目数、大小、固定标记、
+  预览差异（新增/删除/修改，字段级）、带 Authorization 的下载。
+
+### 韧性 UI
+
+- `ConnectionBanner`：每 30 秒探一次 `/api/workspace/info`，后端不可达或设备
+  离线时显示“无法连接后端 / 此时不会保存任何修改”，不假装保存。
+- `ErrorFallback` 重写：不再只有“出错了 + 重试”，给出 3 步手工恢复
+  （下载备份 → 覆盖 `data/workspace.md` → 重启），并明确“先别删东西”。
+- 模块化入口 `App.tsx` 现在包在 `GlobalErrorBoundary` 里（此前只有旧的
+  `AppShell` 分支有错误边界，模块化路径崩了就是白屏）。
+
+### 不重复造轮子（D35）
+
+- RRULE 展开从自研 420 行换成 `rrule@2.8.1`（BSD-3，687 KB）：
+  `expandRecurrenceDates` 内部走 `new RRule(...).between()`，本地墙上时间用
+  “伪 UTC”适配；`parseRRule` / `formatRRule` / `describeRRule` 等对外签名不变。
+- 评估了 `chrono-node` 但**没有替换**中文解析器：它缺“每月1号”重复规则、
+  “每周一三五”多选周几、“下下周一”相对周、标题剥离等本项目语义，
+  换过去会退化。评估过程与结论记在 `docs/planning/oss-reuse-audit.md`。
+- 同时修了中文解析器的 3 个真实 bug：「明早/明晚」不识别、「明年1月1日」
+  多加一年、「每周一三五」标题残留周几。
+- 决策记录：`D8` 改为由 `D35` 取代（允许为替代高风险自研而新增运行时依赖，
+  需过 License/体积/Node 22/离线安装检查）。
+
+### 验证
+
+- `pnpm -C apps/server typecheck` 0 错误；`pnpm -C apps/server test`
+  **17 文件 / 407 通过 / 0 跳过**；`pnpm -C apps/server build` 通过。
+- `pnpm -C apps/renderer typecheck` 0 错误；`pnpm -C apps/renderer test`
+  **11 文件 / 102 通过**；`VITE_API_URL= pnpm -C apps/renderer build` 通过。
+- 真服务验收脚本：`acceptance.e2e.mjs` 92 通过 / 0 失败，
+  `workspace-acceptance.e2e.mjs` 32 通过 / 0 失败。
+
+### 下一步
+
+P5：单用户 Bearer 认证（`resolveApiToken` + `createApp({auth})` 启用）+
+前端 token/AuthGate + ICS 导出改 fetch/Blob。P5 与 P6 必须同版本发布。
+
+
+## 2026-11-03（P3：写入收敛到 mutateWorkspace，退役 md-bridge / kanban）
+
+P3 收尾数据层的「写」并清掉旧架构。P2 已经把 `readWorkspace` 变严格、把写入口
+收敛成 `mutateWorkspace`，但业务路由还在用旧的 `writeWorkspace`；同时
+`/api/md-bridge/*`、`/api/kanban/*` 两套旧路由仍在挂载，读的是 2026-10-26
+就废弃的 `events.md` / `工作搭子看板.md`。这一步把两者都结束掉。
+
+- **5 个写路由改成单事务**（`apps/server/src/routes/workspace.ts`）：
+  POST `/items`、PUT `/items/:id`、DELETE `/items/:id`、POST `/ics/import`、
+  POST `/lists/rename`。每个都从「外面读一次 → 改数组 → 整体写回」变成一次
+  `mutateWorkspace(ws => …)`：
+  - id 重复检查搬进锁内。锁外检查在并发下一定失效（两个请求同时读到「不存在」）；
+  - 级联删除的子任务计算也在锁内，返回的 `removedChildren` 是真实数字；
+  - 404 / 409 / 400 改用 `WorkspaceHttpError`，不再在 handler 里 `res.status(...)`，
+    由统一错误中间件输出（响应体保留 `errors` / `editableFields` / `hint`）。
+- **删除 `writeWorkspace`**（`apps/server/src/workspace.ts`）：P2 保留它只是为了
+  让 P3 能分批迁移。现在业务写只剩 `mutateWorkspace` / `mutateWorkspaceText`，
+  测试夹具改为 `fs.writeFileSync(serializeWorkspace(...))` 或 `seedFile()` helper。
+- **CalDAV 拉取落盘也进锁**（`apps/server/src/caldav-sync.ts`）：
+  拉取循环在锁外（网络慢，不能占着锁），落盘时按 `fingerprintItems` 比对差异，
+  只把真正变化的条目在 `mutateWorkspace` 里替换/新增 —— 不会把用户在拉取期间
+  新写的条目覆盖掉。提交前 `assertWritable(epochAtStart)`，恢复数据期间拉取
+  结果直接丢弃（`SyncEpochError`）。
+- **sync 活动登记**：`syncWorkspaceToCalDAV()` 用 `beginSyncActivity("caldav")`
+  包住，`finally` 结束。这样 P7 的恢复流程能 `waitForInFlightSync()` 等到真正
+  的同步结束，而不是只看定时器有没有停。
+- **统一错误中间件拆出**（`apps/server/src/http-errors.ts`）：`createApp` 用它，
+  裸 `express()` 的测试也用它。之前测试里没有它，路由抛错会走 Express 默认 HTML
+  错误页，前端 `JSON.parse` 直接炸成 `Unexpected token '<'`。
+- **退役旧架构**（D19 / D29）：
+  - 删除 `apps/server/src/routes/md-bridge.ts`（705 行）、`routes/kanban.ts`（701 行）、
+    `apps/server/src/md-ics-bridge.ts`（712 行）；
+  - `app.ts` 不再挂载 `/api/md-bridge`、`/api/kanban`（现在命中 `/api` 的 JSON 404）；
+  - 删除 `apps/renderer/src/api/md-bridge.ts`、`api/kanban.ts`（生产代码已无引用）；
+  - `config.ts` 的 `paths` 只剩 `workspaceFile`；`resolveDataPath()` 只接受
+    `"workspace"`，去掉 `MD_EVENTS_FILE` / `KANBAN_FILE_PATH`；
+  - `apps/renderer/src/api/webdav.ts`、`components/settings/ConfigSettings.tsx`
+    的 `key` / `paths` 类型同步收窄；
+  - 示例插件改用 `/api/workspace/items`。
+- **测试**：删除 `e2e-bridge.test.ts`、`e2e-full.test.ts`、`kanban-id.test.ts`、
+  `ics-file.test.ts`（锁的都是已删除的代码）；`acceptance.e2e.mjs` 重写为
+  workspace 原生（85 → 92 项，含「旧接口已 404」断言），并把自然语言用例的
+  期望日期从写死的 2026-10-26 改为按「今天」计算 —— 以前隔天跑就全红。
+- **验证**：`pnpm -C apps/server typecheck` 0 错误；`pnpm -C apps/server test`
+  **384 通过（16 文件，0 跳过）**；`pnpm -C apps/server build` 通过；
+  `pnpm -C apps/renderer typecheck` 0；`pnpm -C apps/renderer test` 96 通过；
+  `VITE_API_URL= pnpm -C apps/renderer build` 通过且产物无 `localhost:3001`；
+  起真服务跑 `acceptance.e2e.mjs` 92/92、`workspace-acceptance.e2e.mjs` 32/32。
+
+下一步 P4：备份只读接口与界面（列表 / 预览 / 导出）、500 页面引导、离线横幅。
+
+## 2026-11-03（P2：数据核心——读取失败不静默、写入原子化、并发有序）
+
+P2 只做一件事：把 `workspace.md` 这个**唯一事实源**读写路径上的容错做到位。
+界面和路由行为尽量不动，但数据层从「尽力而为」变成「要么正确、要么明确报错」。
+
+- **读取失败不再当空文件**（`apps/server/src/workspace.ts` `readWorkspace`）：
+  以前用 `existsSync` + 兜底 `catch`，把 `EACCES` / `EISDIR`（Docker 挂错卷、NAS 权限）
+  当成「文件不存在」，随后任何一次写入都会用空集合覆盖真实数据。现在只有 `ENOENT`
+  才返回空；其它错误码抛 `WorkspaceReadError`。另外：有 `##` 块却一条都认不出来时
+  直接抛错并提示从 `.workspace-backups` 恢复，绝不静默清空。
+- **round-trip 保真**（SDS §2.5）：
+  - frontmatter 原样保存（`frontmatterRaw`），`schema: workbench/v2` 不会被降级成 v1；
+  - 未知字段（含中文键名 `- 另一个: 值`）收进 `extra`，序列化时按原行序写回；
+  - 未知块用 `<!-- workbench:unknown:start/end -->` 包住原样保留，不再被 `<!-- notes -->` 吞掉；
+  - 标题/描述里的引号、反斜杠、换行经 `escapeScalar` / `unescapeScalar` 往返；
+  - 坏条目保留 `rawBlock` 原样写回，未修改就不会因为一次无关写入被丢掉；
+  - 锁定「解析 → 序列化 → 再解析 → 再序列化」幂等。
+- **`mutateWorkspace` / `mutateWorkspaceText`**（`apps/server/src/workspace-store.ts`）：
+  所有写入走「加锁 → 读取 → 回调 → 序列化 → **回读校验** → 图校验 → 备份 → 原子写」。
+  回读校验是关键：如果生成的文本自己都解析不出来，就不落盘（避免写坏事实源）。
+- **锁**（`apps/server/src/workspace-lock.ts`）：进程内 FIFO 队列，默认 10s 超时；
+  **排队超时的任务会被取消、绝不晚点执行**（否则客户端已收到 503，写入却仍然发生）。
+  锁内再次调用 `mutateWorkspace` 抛 `LockReentryError`（要用 `mutateWorkspaceText`）。
+  网络 IO 仍在锁外，锁只覆盖读-改-写。
+- **图校验**（`validateWorkspaceGraph`）：默认只校验本次改动到的条目（`validate: "changed"`），
+  历史脏数据不会让每次写入都 400；改到坏条目本身、或删父任务留下孤儿引用时才拒绝。
+  规则：id 唯一、parent 存在、无自环/环、`end > start`、`remind` 格式。
+- **原子写**（`apps/server/src/storage-check.ts`）：写临时文件 → `fsync` → `rename`；
+  Windows/SMB 的 `EPERM`/`EBUSY` 有限重试（100/200/400/800/1600ms），失败就报错而不是降级直写。
+  崩溃注入 `WORKSPACE_CRASH_AFTER_TMP=1` 可验证「旧文件完好、只剩一个可清理的 tmp」。
+- **只读降级启动**（D28）：`index.ts` 启动时先做存储自检（真的写一次、rename、读回），
+  失败则**不退出**，降级为只读：读接口 200、写接口 503 `WORKSPACE_READ_ONLY`，
+  `/api/workspace/info` 返回 `storageSafe: false` / `readOnly: true`，
+  并跳过 CalDAV 自动同步与提醒定时器（否则只会刷错误日志）。
+  `ALLOW_UNSAFE_FS=1` 是显式逃生门（WARN 后继续可写）。
+- **测试**：新增 `workspace-store.test.ts`（25）与 `storage-check.test.ts`（6）。
+  服务器测试 378 → **409 通过 / 33 跳过（20 个文件）**；`tsc --noEmit` 与 `pnpm build` 均通过。
+  覆盖：读取四态、round-trip 保真、50 并发不丢、同条目并发改两个字段、删除最后一条、
+  排队超时不执行、锁重入、写坏文本拒绝落盘、只读/维护拒绝、历史脏数据不阻塞、
+  孤儿/环/区间/提醒、崩溃注入与 tmp 清理。
+
+> 兼容期保留：`writeWorkspace` 仍导出（标记 `@internal`），P3 会把所有调用方迁到
+> `mutateWorkspace` 后删除它；旧的 `/api/md-bridge`、`/api/kanban` 也留到 P3 一并退役。
+
+## 2026-11-02（P1：应用装配 + 错误契约 + CI 修复）
+
+按 SDS v0.3 §9 完成 P1，**未改变任何业务行为**（路由内容、响应结构、数据格式都没动），
+只是把「顺序」和「错误」两件最容易出错的事固定下来。
+
+- **新增 `apps/server/src/app.ts`**：`createApp({ auth, staticDir, trustProxyHops,
+  storageReadOnly, routers })`。中间件顺序显式写死为
+  `cors → /health → 路径规范化 → /api 认证 → json → 只读闸门 → 维护闸门 → API 路由
+  → API 404 → 静态 → SPA → 404 → 错误中间件`。
+  - 认证必须在静态与 SPA 之前：此前 `/api/caldav`、`/api/notifications` 两个路由挂在
+    静态兜底之后，未带 token 的 `/API/...` 会拿到 200 + `index.html`。
+  - SPA 正则改为大小写不敏感 `/^\/(?!api(\/|$)|...)/i`，并在 `sendFile` 前二次校验
+    解码后的路径。
+  - 路径规范化拒绝 `/%61pi/...`、`/api%2F...`、`%5c`、`//api`（400 `BAD_PATH` /
+    `ENCODED_API_PATH`），避免 Express 4 用原始 `req.url` 匹配 `/api`、而
+    `express.static` 自行解码导致的鉴权绕过。
+- **新增 `apps/server/src/errors.ts`**：`WorkspaceReadError` / `WorkspaceValidationError` /
+  `WorkspaceHttpError` / `LockTimeoutError` / `LockReentryError` / `WorkspaceReadOnlyError` /
+  `SyncEpochError` / `MergeInvalid` / `MergeConflict` / `MaintenanceError` / `ApiTokenError`。
+  统一 4 参数错误中间件映射为 JSON（400/404/409/500/503），500 永不返回绝对路径。
+- **新增 `apps/server/src/sync-control.ts`（骨架）**：`currentSyncEpoch` /
+  `invalidateSyncEpoch` / `setSyncMaintenance` / `isSyncMaintenance` /
+  `setStorageReadOnly` / `isStorageReadOnly` / `assertWritable` /
+  `beginSyncActivity("caldav" | "webdav" | "restore")` / `waitForInFlightSync`。
+  P1 只提供接口与状态，尚未接入 CalDAV/WebDAV/提醒调度器（P2/P7 接入）。
+- **`index.ts` 只保留生命周期**：`createApp({ auth: false, staticDir })`（P5 换成
+  `{ token }`，P1 阶段显式 `false`，没有「忘配置就裸奔」的默认值）、先 `listen` 再
+  异步探测 CalDAV、`EADDRINUSE` 明确报错、`SIGINT/SIGTERM` 优雅关闭。
+- **32 个 async 路由处理器统一包 `asyncHandler`**：Express 4 不会把 Promise rejection
+  交给错误中间件，Node ≥15 会因未处理 rejection 直接杀进程，客户端表现为请求挂起。
+  现有 try/catch 保留（业务错误仍走原有响应结构），`asyncHandler` 只兜住 catch 之外
+  的异常（例如 `requireConfig` 抛错、`loadCalDAVSyncSettings` 读配置失败）。
+- **测试**：新增 `apps/server/src/__tests__/app-create.test.ts`（18 个）：认证参数边界、
+  `/API` 大小写、编码路径 400、`/api//`、未知 API 404 JSON、OPTIONS 204、`Origin: null`、
+  非法 JSON 400、async rejection → JSON 500、静态 `api/` 不可匿名读取、SPA 回落、
+  只读/维护闸门白名单。服务器测试 360 → 378 通过（33 跳过不变）。
+- **CI（`.github/workflows/test.yml`）**：Node 20 → 22；`npm i -g pnpm` →
+  固定 `pnpm@11.8.0`；`pnpm install` → `--frozen-lockfile`；`upload-artifact@v3` →
+  v4（v3 已退役）；`actions/*@v3` → v4；构建前端时显式 `VITE_API_URL: ""`，
+  防止 `apps/renderer/.env` 里的 `localhost:3001` 被打进产物。**typecheck 保留**。
+- **类型检查清零**：`apps/server` 原有 168 个测试文件类型错误（`Response.json()`
+  在 TS 5.3 + undici 类型下为 `unknown`、`zh-time.test.ts` 未处理 `null`、
+  `config-plugins.test.ts` 引用不存在的 `../framework/plugins.js`）全部修掉，
+  `pnpm -C apps/server typecheck` 现为 0 错误；没有放宽 `tsconfig`。
+- **`apps/renderer` 补 `typecheck` 脚本**（`tsc --noEmit`），CI 才能实际执行前端类型检查。
+
+验证：`pnpm -C apps/server test` 378 passed / 33 skipped；
+`pnpm -C apps/server typecheck` 0；`pnpm -C apps/server build` 通过；
+`pnpm -C apps/renderer test` 96 passed；`pnpm -C apps/renderer typecheck` 0。
+
+## 2026-11-02（v0.3.0 SDS 复审与 v0.3 修订）
+
+两轮独立复审（架构/安全/数据、实现/可测试性/运维）均为**有条件通过**，共 9 项阻断；
+SDS 从 v0.2（816 行）修订到 v0.3（955 行），仍未写实现代码。
+
+- **复审文件**：`docs/planning/reviews/v0.3.0-sds-rereview-architecture.md`、
+  `v0.3.0-sds-rereview-implementation.md`。
+- **架构 R1–R4**：恢复无出口（preview 被 maintenance 拦、pinned 过期无法 abort）；
+  WebDAV 在飞未纳入恢复排空；`%61pi` 编码路径绕过 auth；WebDAV merge 先 PUT 后校验且丢元数据。
+- **实现 1–5**：P5/P6、P7/P8 坏中间版本；恢复失败无出口；reminder tick 跨恢复竞态；
+  P2→P3 构建断裂 + `sync-control` 无归属；`%61pi` 不 401。
+- **v0.3 修订**：锁排队超时取消；空 workspace/删最后一条合法；`sync-control` 统一
+  CalDAV/WebDAV/reminder activity + epoch；路径规范化 400；merge 先校验后 PUT 且保留
+  frontmatter/unknown/extra/rawBlock；restore abort/启动清过期 marker；readOnly/maintenance
+  覆盖所有写；P5+P6、P7+P8 同发布；测试 S1–S24 / F1–F10 与 P1–P9 重排。
+- **决策**：新增 D30–D34；`v0.3-plan.md` A1 顺序改为 canonicalize → auth → static。
+- **下一步**：文档收尾（plan/README/UPDATE_LOG/决策日志）后，在新会话按 P1–P9 实施。
+
+## 2026-11-02（v0.3.0 SDS 两轮评审与修订）
+
+v0.3.0 SDS 经两位独立评审，均判定「不通过」，共 10 项阻断。已重写为 v0.2（816 行），
+未写实现代码。
+
+- **评审文件**：`docs/planning/reviews/v0.3.0-sds-review-architecture.md`、
+  `v0.3.0-sds-review-implementation.md`。
+- **主要阻断**：认证/静态资源顺序可绕过；空 token 可通过；WebDAV 合并重复加锁；
+  恢复期间普通写与同步回写可覆盖新数据；读失败被当空文件；Electron 包内没有 server；
+  `/data` 只读与启动策略冲突；异步错误无统一契约；图校验把历史坏数据变成永久 400；
+  恢复/冲突/备份 UI 的数据源缺失。
+- **v0.2 关键修订**：`createApp` 认证先于静态与 SPA；token 64-hex 校验 + 原子 0600；
+  `prepareMerge`/`commitMerge` 单事务；恢复维护模式覆盖所有写 API + epoch + in-flight 排空；
+  `readFileSync` 仅 ENOENT 为空 + 全局 JSON 错误中间件；Electron 用 esbuild 打包 server +
+  主进程 `webRequest` 注入 token；D28 只读启动；D29 下线全部 md-bridge/kanban 路由；
+  同步中心无网络字段。
+- **决策**：D16/D19 修订，新增 D28/D29；`v0.3-plan.md` 的 WebDAV 字段改为 `lastKnownEtag`。
+- **下一步**：v0.2 复审通过后，按 P1–P9 在新会话实施。
+
+## 2026-11-02（架构评估：ChronoMD 提案）
+
+评估了「Markdown 唯一数据源 + Task/Event/Time Block + VTODO + AI + NAS」的提案：
+
+- **采纳为方向**：Task/Event/Time Block 语义分离、VTODO 任务集合、AI Command Layer、
+  可重建索引、Git 历史（可选）、PWA/自托管。
+- **不做**：直接重写 Python/FastAPI；v0.3 切换「一任务一文件」；把 SQLite 当事实源；
+  把 sync 元数据写进 MD。
+- **理由**：多文件涉及跨文件事务、watcher、WebDAV 目录同步、迁移与全库一致性；
+  Python 重写会丢掉 30k 行、456 个测试和已跑通的同步/推送。
+- **决策**：D20–D27 写入 `docs/planning/reviews/decision-log.md`；评估见
+  `docs/planning/CHRONOMD_PROPOSAL_REVIEW.md`。
+- **v0.3 计划定稿**：仍用单 `workspace.md`，18.5–23.5 人日，先数据安全/认证；
+  v0.4 做语义/VTODO/AI；v0.4.5 做数据层 spike 再决定多文件。
+- 数据源文档补充「为什么不是一任务一文件 / 何时重估」（`REF/DATA_SOURCE.md`）。
+
+## 2026-11-02（提醒 / 手机推送 / Docker 自托管）
+
+### 需求
+
+1. 本地提醒之外，要能接入主流推送（企业微信机器人、Server酱等），方便直接推到手机；
+2. 支持 Docker：后端放 NAS / 服务器，其他平台只跑前端连过去；
+3. 同时保留前后端打包在一起的本地版本。
+
+### 提醒的数据模型
+
+新增 `remind` 字段，存**绝对本地时间**。没有用「提前 N 分钟」是因为：
+全天事件、只有截止日的任务没有明确开始时刻，存偏移量就得定义
+「从 0 点算还是 9 点算」的隐藏规则，用户看到的和实际触发的容易对不上。
+界面上的预设只是输入辅助，保存前换算成绝对时间。
+
+### 两条提醒通道
+
+- **应用内**：`ReminderHost` 挂在最外层，30 秒轮询 + 聚焦检查，右下角卡片，
+  稍后 10 分钟，localStorage 去重。应用没开就不提醒。
+- **服务端推送**：`notifications/scheduler.ts` 每 30 秒读 workspace.md，
+  到点调用 `push.ts` 发企业微信 / Server酱 / PushPlus / Bark / ntfy / Webhook。
+  Docker 下后端常驻 → 7×24。
+
+去重状态放在 workspace 同目录 `.reminder-state.json`；失败 5 分钟后重试；
+只要任一渠道成功就记为已推送（避免某渠道配错导致其他渠道重复收）。
+
+### Docker
+
+多阶段构建：build（装全量依赖 + 编译 server/renderer）→ deps（只装生产依赖）→
+runtime（node:22-alpine + tzdata，非 root）。前端产物放在 `/app/public`，
+server 通过 `STATIC_DIR` 同时托管 API 与页面。数据卷 `./data:/data`。
+
+### 前端-only
+
+新增 `api/base.ts`：`window.__API_BASE_URL__` > localStorage > `VITE_API_URL` > 同源。
+设置页「通用 → 后端地址」可改，保存后刷新即可连接 NAS 后端。
+
+### 验证
+
+后端 360 / 前端 96 全绿；本地用 `STATIC_DIR=apps/renderer/dist` 验证了
+首页、hash 路由兜底、静态资源与 `/api` 共存。
+
+Docker 镜像已在本机构建并跑通（node:22-alpine，253MB）：
+
+- 容器内首页、静态资源、`/api/workspace`、`/api/notifications/*` 都正常
+- 数据卷写入成功（建了一条带 `remind` 的条目，宿主机 `data/workspace.md` 可见）
+- 镜像里前端 bundle **没有**被打上 `localhost:3001`（`.dockerignore` 排除了
+  `apps/renderer/.env`，构建时再显式 `VITE_API_URL=`）
+- node 进程以 `app`（uid 100）运行
+
+### 构建时踩到的三个坑
+
+1. **corepack 下载 pnpm 会卡住**：改成 `npm install -g pnpm@11.8.0`，并显式
+   `--registry=$NPM_REGISTRY`；容器 DNS 常先返回 IPv6，加
+   `NODE_OPTIONS=--dns-result-order=ipv4first`。
+2. **pnpm 依赖是软链**：生产依赖在 `apps/server/node_modules` 下指向
+   `../../../node_modules/.pnpm`，只拷根 `node_modules` 会 `ERR_MODULE_NOT_FOUND`，
+   两个目录都要拷。
+3. **bind mount 属主**：`./data` 属宿主用户，容器内 app 是 uid 100 → 写不进去。
+   加 `docker-entrypoint.sh`：root 启动 → `chown -R app:app /data` → `su-exec app` 降权。
+
+## 2026-11-02（本地功能加固 + 冲突三选一）
+
+### 定调：先把本地做好，联网只是尾巴
+
+用户的判断是对的：WebDAV / CalDAV 只是同步 md 与 ICS，大头是本地功能；
+而且本地优先意味着「服务器连不上也必须完整可用」。所以这一轮只做三件事：
+修本地 bug、补本地缺的交互、把冲突处理统一成三选一。
+
+### 修掉的 bug（都是会让人以为「数据丢了」的那种）
+
+- **截止日当天算逾期**：`new Date("2026-11-02")` 按 UTC 解释，东八区 8 点后
+  `due < now` 恒成立。统一收口到 `utils/date.ts` 的本地日比较。
+- **「排期」按钮保存必失败**：写 `end == start`，服务端校验 `end > start` 直接拒。
+  现在自动 +1 小时，并在看板上给出失败提示。
+- **编辑任务丢 kind**：表单没回填 `kind`，保存时默认 `event` —— 任务从看板消失。
+- **重复事件编辑挪动系列**：以前点某一次实例就用那天的日期当锚点保存。
+  现在服务端在展开时带上 `seriesStart` / `seriesEnd`，编辑回填系列原点。
+- **删除父任务留下孤儿**：子任务还在文件里，但看板不渲染、清单不统计，
+  用户完全看不到。现在 DELETE 级联删除整棵子树，响应返回 `removedChildren`。
+
+### 补的本地功能
+
+- 任务点击编辑（标题 / 优先级 / 截止 / 时间 / 清单 / 项目 / 重复）
+- 任务搜索、清单重命名（空 = 收件箱）
+- 工作台今日日程按 RRULE 展开、回到窗口自动刷新、同步状态不再读废弃 store
+
+### 冲突：三选一，且真的能合并
+
+- **WebDAV**：新增 `/api/webdav/merge`，按 id 取并集；同一条目用 `updatedAt` 较新的一版；
+  时间相同但内容不同 → 保留本地并报告。先推远端（If-Match）成功后再写本地，防止并发覆盖。
+- **CalDAV**：状态文件新增 `fields` 字段快照作为合并基线，实现字段级三方合并；
+  两边改同一字段时保留本地，并返回 `conflictFields`。
+
+### 验证
+
+后端 349 / 前端 84 全绿；`pnpm build`（server + renderer）通过。
+新增回归：日期工具 7 项、编辑/逾期 2 项、CalDAV 合并 2 项、WebDAV 合并 6 项、级联删除 1 项。
+
+## 2026-11-02（CalDAV 通道迁移到 workspace.md）
+
+### 要解决的问题
+
+README 与 `SYNC_MANAGEMENT.md` 里都记着同一个已知缺口：日历页的「推送 / 拉取 /
+双向同步」走的是遗留的 `/api/md-bridge/sync/caldav`，读写的还是废弃的 `events.md`。
+于是出现一个很别扭的状态：界面上看到的是 workspace.md 的数据，点同步推上去的却是另一份文件。
+
+### 做了什么
+
+1. 新写同步引擎 `caldav-sync.ts`，不再复用 md-bridge：
+   - 逐对象 PUT，`If-Match` 走 ETag；412 就是冲突，不静默覆盖
+   - PROPFIND 拿 ETag，未变化的对象不 GET（增量）
+   - 状态文件 `.caldav-sync-state.json` 记录「上次同步时的字段指纹 + ETag」
+2. 数据模型加 `uid`：远端 UID 必须落盘，否则回推会新建对象（手机日历重复）
+3. 前端切到 `/api/caldav/sync`，同步结果显示冲突项和两个选择按钮
+4. 设置页加「日历 URL / 读取日历列表 / 测试连接」
+5. 自动同步改为服务端定时器（改配置不用重启）
+
+### 迁移时发现的两个坑
+
+- **`project` 写成 CATEGORIES 会污染 tags**：拉回来时 project 变成 tags 里的一项，
+  字段指纹每次都不同 → 每次同步都白跑一轮 pull+push。改成 `X-WORKBENCH-PROJECT`。
+- **`allDay: false` 与缺省值被当成不同**：远端解析出 false、本地是 undefined，
+  指纹不一致，同样导致每轮同步都重复处理。指纹里统一归一化。
+
+### 验证
+
+模拟 CalDAV 服务端（Node http）跑了 21 项：UID 落盘、二次推送不重传、增量 GET、
+远端修改合并、本地/远端都改的冲突、按 UID 范围 force、RECURRENCE-ID 跳过、
+升级前老条目认领、日历发现回退、路由 502 文案。
+真实 Radicale 未连接测试（服务器未开，等联网后跑 `scripts/verify-caldav-live.mjs`）。
+
+## 2026-11-02（清单 / 子任务 / 文档全量校正）
+
+### 「别人拿着老物料开发工具」
+
+用户提出：开发说明和 reference 文档必须跟上代码，否则后续协作时别人照着旧文档
+写代码，会写出跟现行架构相冲突的东西。
+
+当时文档的实际状态：
+
+| 文档 | 状态 |
+| ---- | ---- |
+| `REF/MD_ICS_BRIDGE.md` | 整篇描述 `events.md` 的 YAML frontmatter 格式 —— 那是 2026-10-26 就废弃的架构 |
+| `docs/SYNC_MANAGEMENT.md` | 同步对象写成「`events.md` + `工作搭子看板.md` 两个文件」 |
+| `docs/TESTING.md` | 停在「121 项通过（2026-10-19）」，且没有 workspace / recurrence / ics-convert 三个核心测试文件 |
+| `README.md` | Features 里还写着 localStorage 缓存、底部状态栏、双向绑定、`KANBAN_FILE_PATH` |
+| `REF/ARCHITECTURE.md` | 没有数据层章节，还提 `events.md` |
+| `.env.example` | 完全没有 `WORKSPACE_FILE`，只有旧的两个文件路径 |
+
+### 处理方式
+
+1. **重写而不是打补丁**：`MD_ICS_BRIDGE.md`、`SYNC_MANAGEMENT.md`、`TESTING.md`
+   三篇整体重写；其余做定点校正。
+2. **加索引**：新增 `REF/README.md`，把材料分成「当前有效 / 设计稿 / 历史或第三方」，
+   并在开头列出三条最容易搞错的点。
+3. **数字要能复现**：测试数字全部来自实际执行，文档里写明命令。
+4. **顺手修界面文案**：文档改了但界面还在说 `events.md`，等于把老物料发给了用户。
+   工作台横幅、日历数据源标注、导入替换提示、WebDAV 面板、设置页数据文件区全部改正。
+
+### 校正过程中抓到的真实 bug
+
+**WebDAV 拉取后界面不刷新。** 前端判断「拉取成功就重读本地数据」用的是
+`r.results.some(x => x.key === "events" && x.ok)`。WebDAV 通道切到单文件后，
+后端返回的 key 是 `workspace`，这个条件**永远为 false** ——
+拉取成功、数据已落盘、界面还是旧的。已改成同时接受 `workspace` / `events`。
+
+`api/webdav.ts` 的类型也同步放宽，避免下次再被类型挡住真实返回值。
+
+**设置页改不了数据文件路径。** 设置页只暴露了 `paths.eventsFile` 与
+`paths.kanbanFile`（两个都已废弃），真正生效的 `paths.workspaceFile`
+在界面上根本没有入口。已改为配置 `workspaceFile`，旧的两个标注为「仅迁移用」。
+
+### 明确的已知缺口
+
+**CalDAV 写入通道还没迁移到 workspace.md。** 日历页「推送 / 拉取 / 双向同步」
+三个按钮仍然调用遗留的 `POST /api/md-bridge/sync/caldav`，它读写的是 `events.md`。
+`events.md` 不存在时这三个按钮等于空转。
+
+这不是配置问题，是重构留下的半截工程。修复需要：
+
+1. `apps/server/src/caldav.ts` 补写能力（现在只有 `fetchCalendarObjectsDirect` 读）
+2. 新增 `POST /api/workspace/caldav/sync`，用 `itemsToIcsMap()` 逐条 PUT
+3. 前端三个按钮改为调新接口
+
+在文档里已如实标注（`docs/SYNC_MANAGEMENT.md` 的 CalDAV 章节），
+不写成「已支持」，避免下一个人被误导。
+
 ## 2026-10-26（架构重构）
 
 ### 用户质疑推动的架构调整

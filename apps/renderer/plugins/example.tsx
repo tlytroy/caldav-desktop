@@ -2,7 +2,7 @@
  * 示例插件组件
  *
  * 演示：外部模块如何作为一个普通 React 组件工作。
- * 它可以调用后端 API、读写 events.md —— 与内置模块没有任何区别。
+ * 它可以调用后端 API、读写 workspace.md —— 与内置模块没有任何区别。
  *
  * 约定：
  *   - 文件名与 manifest 的 `component` 字段一致
@@ -11,9 +11,9 @@
  */
 
 import { useState, useEffect } from "react";
-import axios from "axios";
+import { API_BASE_URL } from "../src/api/base";
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL });
+const api = axios.create({ baseURL: API_BASE_URL });
 
 export default function ExamplePlugin() {
   const [eventCount, setEventCount] = useState<number | null>(null);
@@ -21,8 +21,8 @@ export default function ExamplePlugin() {
 
   useEffect(() => {
     api
-      .get("/api/md-bridge/events")
-      .then((r) => setEventCount(r.data?.events?.length ?? 0))
+      .get("/api/workspace/items")
+      .then((r) => setEventCount(r.data?.count ?? 0))
       .catch((e) => setError(e?.response?.data?.error || e?.message));
   }, []);
 

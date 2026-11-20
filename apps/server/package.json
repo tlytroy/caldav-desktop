@@ -1,10 +1,11 @@
 {
   "name": "caldav-server",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "dev": "tsx --watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -16,6 +17,7 @@
     "express": "^4.19.2",
     "ical.js": "^1.5.0",
     "multer": "^2.0.0",
+    "rrule": "^2.8.1",
     "tsdav": "^2.2.2"
   },
   "devDependencies": {

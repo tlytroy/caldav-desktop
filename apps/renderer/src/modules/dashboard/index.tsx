@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from "react";
+import React, { useCallback, useMemo, useEffect, useState } from "react";
 import { useModuleRegistry } from "../../framework";
 import { PlaceholderModuleCard } from "../../framework";
 import {
@@ -11,9 +11,13 @@ import {
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
-import { useCalendarStore } from "../../store/calendarStore";
-import { useSyncStore } from "../../store/syncStore";
 import { fetchItems, type WorkbenchItem } from "../../api/workspace";
+import {
+  fetchCalDAVSyncStatus,
+  type CalDAVSyncStatus,
+} from "../../api/caldav-sync";
+import { isOverdue, localDate } from "../../utils/date";
+import { describeRemind, upcomingReminders } from "../../utils/reminders";
 
 /**
  * DashboardPage - 工作台首页
@@ -30,15 +34,15 @@ export default function DashboardPage() {
   const activeModules = getActiveModules();
   const placeholderModules = getPlaceholderModules();
 
-  // 从 store 获取真实数据
-  const { calendars, selectedCalendarUrl } = useCalendarStore();
-  const {
-    syncStatus,
-    isSyncing,
-    lastSyncTime,
-    syncError,
-    syncInterval,
-  } = useSyncStore();
+  /**
+   * 工作台只读**本地数据源**，不依赖任何服务器。
+   *
+   * 同步状态来自 `/api/caldav/status` —— 那是服务端本地摘要（不发网络请求），
+   * 所以服务器关着也只是显示「从未同步」，不会让工作台报错或变空白。
+   */
+  const [sync, setSync] = useState<CalDAVSyncStatus | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [filePath, setFilePath] = useState("");
 
   /**
    * 工作台读**统一数据源**（workspace.md）——与日历、看板完全同源。
@@ -52,11 +56,44 @@ export default function DashboardPage() {
    *  - kind=task 的 → 看板任务
    */
   const [items, setItems] = useState<WorkbenchItem[]>([]);
-  useEffect(() => {
+  /** 今日日程（已展开重复事件） */
+  const [todayExpanded, setTodayExpanded] = useState<WorkbenchItem[]>([]);
+
+  const load = useCallback(() => {
+    const today = localDate();
+
+    // 全量：算待办与总数（工作台是总览，不做日期筛选）
     fetchItems()
-      .then((r) => setItems(r.items || []))
+      .then((r) => {
+        setItems(r.items || []);
+        setFilePath(r.filePath || "");
+      })
       .catch(() => setItems([]));
+
+    // 今日：**必须 expand**，否则「每周一三五」的重复事件今天不会出现
+    fetchItems({ scope: "calendar", expand: true, start: today, end: today })
+      .then((r) => setTodayExpanded(r.items || []))
+      .catch(() => setTodayExpanded([]));
+
+    // 同步状态：服务端本地摘要，不联网
+    fetchCalDAVSyncStatus()
+      .then((s) => {
+        setSync(s);
+        setSyncError(null);
+      })
+      .catch(() => setSyncError("读取同步状态失败（不影响本地数据）"));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // 从别的窗口 / 标签页回来时刷新（快速创建可能刚写过文件）
+  useEffect(() => {
+    const onFocus = () => load();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load]);
 
   // 日历事件：有开始时间的（任务与事件都算）
   const calEvents = useMemo(() => items.filter((i) => !!i.start), [items]);
@@ -64,40 +101,41 @@ export default function DashboardPage() {
   // 看板任务：kind=task
   const allTodos = useMemo(() => items.filter((i) => i.kind === "task"), [items]);
   const openTodos = allTodos.filter((t) => !t.done);
-  const overdueTodos = openTodos.filter(
-    (t) => t.due && new Date(t.due).getTime() < Date.now(),
-  );
+  // 逾期判定走工具函数：截止日当天不算逾期（纯日期串不能按 UTC 解释）
+  const overdueTodos = openTodos.filter((t) => isOverdue(t.due, t.done));
 
-  // 计算今日事件（来自统一数据源）
+  /**
+   * 今日日程：请求时已按「本地今天」筛选并展开重复事件，
+   * 这里只排序 + 取展示字段。
+   */
   const todayEvents = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    return calEvents
-      .filter((e) => {
-        const start = new Date(e.start!);
-        return start >= today && start < tomorrow;
-      })
-      .sort((a, b) => new Date(a.start!).getTime() - new Date(b.start!).getTime())
+    return [...todayExpanded]
+      .sort((a, b) => (a.start || "").localeCompare(b.start || ""))
       .map((e) => ({
-        uid: e.id,
+        uid: e.instanceId || e.id,
         title: e.title || "无标题条目",
         start: e.start!,
         end: e.end,
         allDay: !!e.allDay,
         kind: e.kind,
       }));
-  }, [calEvents]);
+  }, [todayExpanded]);
 
   // 事件总数
   const totalEvents = calEvents.length;
 
-  // 格式化同步时间
-  const formatSyncTime = (timestamp: number | null): string => {
-    if (!timestamp) return "从未同步";
-    const diff = Date.now() - timestamp;
+  // 下一条提醒（工作台的「通知」状态卡用它，不联网）
+  const nextReminder = useMemo(
+    () => upcomingReminders(items, Date.now(), 1)[0],
+    [items],
+  );
+
+  /** ISO 时间 → 「刚刚 / N 分钟前」 */
+  const formatSyncTime = (iso?: string): string => {
+    if (!iso) return "从未同步";
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return "从未同步";
+    const diff = Date.now() - t;
     const minutes = Math.floor(diff / 60000);
     if (minutes < 1) return "刚刚";
     if (minutes < 60) return `${minutes} 分钟前`;
@@ -106,31 +144,21 @@ export default function DashboardPage() {
     return `${Math.floor(hours / 24)} 天前`;
   };
 
-  // 获取选中日历名称
-  const selectedCalendarName = useMemo(() => {
-    if (!selectedCalendarUrl) return "未选择";
-    const cal = calendars.find((c) => c.url === selectedCalendarUrl);
-    return cal?.displayName || selectedCalendarUrl.split("/").pop() || "未知";
-  }, [selectedCalendarUrl, calendars]);
+  const syncStatusLabel = !sync
+    ? "读取中…"
+    : !sync.configured
+      ? "未配置（本地照常可用）"
+      : sync.lastSyncAt
+        ? `已同步 · ${formatSyncTime(sync.lastSyncAt)}`
+        : "已配置，尚未同步";
 
-  // 同步状态标签
-  const syncStatusLabel =
-    syncStatus === "syncing"
-      ? "同步中..."
-      : syncStatus === "success"
-        ? "同步成功"
-        : syncStatus === "error"
-          ? "同步失败"
-          : formatSyncTime(lastSyncTime);
-
-  const syncStatusColor =
-    syncStatus === "syncing"
-      ? "text-blue-500"
-      : syncStatus === "success"
-        ? "text-green-500"
-        : syncStatus === "error"
-          ? "text-red-500"
-          : "text-gray-400";
+  const syncStatusColor = !sync
+    ? "text-gray-400"
+    : !sync.configured
+      ? "text-gray-400"
+      : sync.pendingCount > 0
+        ? "text-amber-500"
+        : "text-green-500";
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
@@ -140,7 +168,7 @@ export default function DashboardPage() {
           个人工作台
         </h1>
         <p className="text-indigo-100 text-sm sm:text-base">
-          日历 · 任务 · 看板 ——以 events.md 与工作搭子看板.md 为唯一事实源
+          日历 · 任务 · 看板 ——以 workspace.md 为唯一事实源
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-indigo-100 text-sm">
           <span className="inline-flex items-center gap-1.5">
@@ -151,12 +179,10 @@ export default function DashboardPage() {
             <ListTodo className="w-4 h-4" />
             {openTodos.length} 项待办
           </span>
-          {calendars.length > 0 && (
-            <span className="inline-flex items-center gap-1.5">
-              <RefreshCw className="w-4 h-4" />
-              当前日历: {selectedCalendarName}
-            </span>
-          )}
+          <span className="inline-flex items-center gap-1.5">
+            <RefreshCw className="w-4 h-4" />
+            {syncStatusLabel}
+          </span>
         </div>
       </div>
 
@@ -225,7 +251,7 @@ export default function DashboardPage() {
             <p className="text-sm">今日暂无事件</p>
             <p className="text-xs mt-1">
               {totalEvents === 0
-                ? "events.md 里还没有事件，去日历页新建一个"
+                ? "workspace.md 里还没有事件，去日历页新建一个"
                 : "享受平静的一天"}
             </p>
           </div>
@@ -309,13 +335,7 @@ export default function DashboardPage() {
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <StatusCard
-            icon={
-              isSyncing ? (
-                <RefreshCw className="w-5 h-5 animate-spin" />
-              ) : (
-                <CalendarCheck className="w-5 h-5" />
-              )
-            }
+            icon={<CalendarCheck className="w-5 h-5" />}
             label="今日事件"
             value={`${todayEvents.length} 个`}
             color={todayEvents.length > 0 ? "text-green-500" : "text-gray-400"}
@@ -323,8 +343,8 @@ export default function DashboardPage() {
           <StatusCard
             icon={<GitBranch className="w-5 h-5" />}
             label="数据源"
-            value={`${totalEvents} 个事件`}
-            color={totalEvents > 0 ? "text-green-500" : "text-yellow-500"}
+            value={`${items.length} 条记录`}
+            color={items.length > 0 ? "text-green-500" : "text-yellow-500"}
           />
           <StatusCard
             icon={<FileText className="w-5 h-5" />}
@@ -335,8 +355,12 @@ export default function DashboardPage() {
           <StatusCard
             icon={<Bell className="w-5 h-5" />}
             label="通知"
-            value="即将到来"
-            color="text-gray-400"
+            value={
+              nextReminder
+                ? describeRemind(nextReminder.item.remind)
+                : "未设置提醒"
+            }
+            color={nextReminder ? "text-green-500" : "text-gray-400"}
           />
         </div>
       </section>
@@ -349,33 +373,29 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <SyncDetailCard
             icon={<RefreshCw className="w-5 h-5" />}
-            label="同步状态"
+            label="CalDAV 同步"
             value={syncStatusLabel}
             valueColor={syncStatusColor}
           />
           <SyncDetailCard
             icon={<Clock className="w-5 h-5" />}
-            label="上次同步"
-            value={
-              lastSyncTime
-                ? new Date(lastSyncTime).toLocaleString("zh-CN")
-                : "从未同步"
+            label="待推送"
+            value={`${sync?.pendingCount ?? 0} 条`}
+            valueColor={
+              sync && sync.pendingCount > 0
+                ? "text-amber-500"
+                : "text-gray-700 dark:text-gray-300"
             }
-            valueColor="text-gray-700 dark:text-gray-300"
           />
           <SyncDetailCard
             icon={<ListTodo className="w-5 h-5" />}
             label="自动同步"
             value={
-              syncInterval
-                ? `每 ${Math.round(syncInterval / 60000)} 分钟`
-                : "已禁用"
+              sync && sync.autoSyncMinutes > 0
+                ? `每 ${sync.autoSyncMinutes} 分钟`
+                : "仅手动"
             }
-            valueColor={
-              syncInterval
-                ? "text-green-500"
-                : "text-gray-400"
-            }
+            valueColor="text-gray-700 dark:text-gray-300"
           />
         </div>
         {syncError && (
@@ -384,11 +404,19 @@ export default function DashboardPage() {
             <span>{syncError}</span>
           </div>
         )}
+        {filePath && (
+          <p className="mt-3 text-xs text-gray-400 dark:text-gray-500 break-all">
+            唯一事实源：<code className="px-1 rounded bg-gray-100 dark:bg-neutral-800">{filePath}</code>
+            <span className="block mt-1">
+              服务器连不上时，上面的日程 / 待办照常读写这个文件；同步只是可选的附加通道。
+            </span>
+          </p>
+        )}
         {totalEvents === 0 && (
           <div className="mt-3 flex items-start gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-yellow-600 dark:text-yellow-400 text-sm">
             <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <span>
-              events.md 里还没有任何事件。日历页新建事件后会写入该文件，它是本工具的唯一事实源。
+              workspace.md 里还没有任何事件。日历页新建事件后会写入该文件，它是本工具的唯一事实源。
             </span>
           </div>
         )}

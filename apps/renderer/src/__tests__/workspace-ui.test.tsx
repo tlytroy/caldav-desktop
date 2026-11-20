@@ -143,6 +143,66 @@ describe("任务看板页面（统一数据源）", () => {
     });
     expect(screen.getByText("已排期")).toBeTruthy();
   });
+
+  it("点击任务标题进入编辑（看板能改标题 / 时间 / 清单）", async () => {
+    const api = mockWorkspace();
+    vi.doMock("../api/workspace", () => api);
+
+    const { default: TasksPage } = await import("../modules/tasks");
+    const { container } = render(React.createElement(TasksPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("体检")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText("体检"));
+
+    // 表单切换成编辑模式，并且回填了原标题
+    await waitFor(() => {
+      expect(screen.getByText("编辑任务：体检")).toBeTruthy();
+    });
+    expect(screen.getByText("保存修改")).toBeTruthy();
+    const titleInput = container.querySelector(
+      'input[placeholder="任务标题…"]',
+    ) as HTMLInputElement;
+    expect(titleInput.value).toBe("体检");
+  });
+
+  it("截止日当天不算逾期（纯日期串的时区回归）", async () => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const api = mockWorkspace({
+      fetchItems: vi.fn(async () => ({
+        items: [
+          {
+            id: "eeee1111",
+            kind: "task",
+            title: "今天到期",
+            due: today,
+            done: false,
+            priority: "mid",
+          },
+        ],
+        filePath: "/tmp/workspace.md",
+        notes: "",
+      })),
+      fetchLists: vi.fn(async () => [
+        { name: "", label: "收件箱", total: 1, open: 1, overdue: 0 },
+      ]),
+    });
+    vi.doMock("../api/workspace", () => api);
+
+    const { default: TasksPage } = await import("../modules/tasks");
+    render(React.createElement(TasksPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("今天到期")).toBeTruthy();
+    });
+    // 逾期告警区不应出现
+    expect(screen.queryByText(/逾期/)).toBeNull();
+  });
 });
 
 describe("统一数据源 API 客户端", () => {

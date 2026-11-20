@@ -1,6 +1,6 @@
 # 积木式模块化架构设计
 
-> ⚠️ **文档与代码的差异说明（2026-10-19 校正）**
+> ⚠️ **文档与代码的差异说明（2026-11-02 校正）**
 >
 > 下文「目录结构设计」是原始设计稿，与实际代码有出入。实际情况：
 >
@@ -13,12 +13,66 @@
 > | `shared/{ui,api,store,hooks,utils,types}` | 平铺为 `api/`、`store/`、`hooks/`、`components/`、`types/` |
 > | `modules/{git-sync,ai-agent,notifications}/index.ts` | 三者共用 `modules/placeholder/index.tsx` |
 > | `settings` / `roadmap` 独立模块 | 未注册，仍是 `components/settings/SettingsModal.tsx` 与 `features/roadmap/` |
+> | 模块各自持有数据（各模块 store 各存一份） | **全部模块读同一个 `workspace.md`**，没有模块级数据副本 |
 >
 > 框架核心（ModuleRegistry / AppRouter / AppLayout / ModuleSlot）与
 > 「active / placeholder」状态机制是**真实可用**的，上表的差异属于组织形式层面，
 > 不影响模块注册与路由的工作方式。
 
+## 当前活跃模块（`apps/renderer/src/modules/index.ts`）
+
+| id | 名称 | 状态 | 说明 |
+| -- | ---- | ---- | ---- |
+| `dashboard` | 工作台 | active | 一次 `fetchItems()` 分拣：有 `start` → 今日日程；`kind=task` → 打勾列表 |
+| `tasks` | 任务 | active | 清单切换、子任务进度、加任务、勾选完成 |
+| `calendar` | 日历 | active | 只读统一数据源，RRULE 展开渲染 |
+| `git-sync` | 多通道同步 | placeholder | WebDAV 通道实际能力在日历页工具栏里 |
+| `ai-agent` | AI 助手 | placeholder | 自然语言创建已实现，但入口在日历页顶部 |
+| `notifications` | 通知推送 | placeholder | 提醒通知**尚未实现** |
+
+外部插件：`apps/renderer/plugins/<id>.json` + 可选 `<id>.tsx`，
+由后端 `GET /api/plugins` 扫描、前端 `loadPluginModules()` 注册。
+**目录必须在 `apps/renderer/` 内** —— 插件是渲染进程的一部分，要和主应用共享
+`node_modules`（放仓库根目录会 import 不到依赖）。
+
+## 数据层：唯一事实源
+
+模块化解决的是「界面怎么组织」，不解决「数据在哪儿」。
+数据层的铁律是 **一个文件**：
+
+```
+apps/server/src/
+├── workspace.ts      # 唯一数据层：解析 / 序列化 / 校验 / 筛选 / 清单聚合 / 子任务进度
+├── recurrence.ts     # RRULE 解析与展开（视图与 ICS 共用）
+├── ics-convert.ts    # 唯一的格式转换点（md ↔ ics）
+├── config.ts         # 配置优先级：config.json > env > .env > 默认（路径例外，env 优先）
+├── caldav-sync.ts    # CalDAV 同步引擎：workspace ↔ ICS ↔ CalDAV（uid / ETag / 冲突 / 自动同步）
+├── caldav.ts         # CalDAV 探测与日历列表（tsdav；同步已不再走它）
+├── webdav.ts         # WebDAV 通道（直接同步 workspace.md，不做转换）
+└── routes/
+    ├── workspace.ts  # /api/workspace/*（标准 CRUD + 清单 + ICS 导入导出）
+    ├── caldav-sync.ts # /api/caldav/*（status / calendars / sync / test）
+    ├── calendar.ts   # /api/calendar/*（CalDAV 探测，遗留）
+    ├── webdav.ts / nlp.ts / config.ts / plugins.ts
+    └── agenda.ts     # 聚合视图（已废弃，保留未挂载）
+```
+
+模块只是这个文件的不同筛选条件：
+
+| 模块 | 请求 |
+| ---- | ---- |
+| 日历 | `GET /api/workspace/items?scope=calendar&expand=true&start=…&end=…` |
+| 任务 | `GET /api/workspace/items?scope=board&topLevel=true&list=…` |
+| 工作台 | `GET /api/workspace/items` 一次拿全，前端分拣 |
+
+**不要**在模块里再建一份数据副本、再做一次同步 —— 那是旧架构（双文件 +
+双向绑定）的老路，已经拆掉。详见 [DATA_SOURCE.md](DATA_SOURCE.md)。
+
+外部日历（CalDAV）也只是一个**通道**：`caldav-sync.ts` 把条目转成 ICS 推上去，
+拉取时按 `uid` 合并回同一条目。它不改变数据归属，也不产生第二份数据。
+
 ## 核心理念
+
 
 本架构采用 **"积木式"微模块架构**，所有功能模块独立开发、独立注册、独立部署（代码分割），通过统一的 Module Registry 进行组装。未开发的模块使用占位组件，不阻塞主框架。
 
@@ -283,7 +337,7 @@ export default gitSyncModule;
 
 - [x] 创建 Dashboard 模块
 - [x] 实现欢迎卡片
-- [x] 实现今日事件概览（2026-10-19 改为直接读 `events.md`）
+- [x] 实现今日事件概览（2026-10-26 起改为读统一数据源 `workspace.md`）
 - [x] 实现今日待办概览
 - [x] 实现系统状态卡片
 - [x] 实现同步状态详情
@@ -298,5 +352,13 @@ export default gitSyncModule;
 - [x] 旧 `AppShell` 保留为回退路径（`App.tsx` 的 `useModularUI` 开关，当前为 `true`）
 - [x] 主题系统回写修复（`theme/ThemeApplier.tsx` + `index.css` 的 `@theme inline`）
 - [x] 缺失的 `styles/touch-optimized.css` / `styles/responsive.css` 补齐
-- [ ] `AppShell` 与相关 props 清理（模块化 UI 已默认启用，旧分支为死代码）
+- [x] ~~数据层统一到 workspace.md~~（2026-10-26 完成，见 DATA_SOURCE.md）
+- [x] 遗留路由与前端 `api/md-bridge.ts`、`api/kanban.ts` 下线（v0.3 P3 完成）
+- [ ] `AppShell`（老 `AppShell`）与相关 props 清理（模块化 UI 已默认启用，旧分支为死代码）
+- [ ] `routes/agenda.ts` 聚合视图已废弃，未挂载，可直接删除
 - [ ] 代码分割粒度优化（主 chunk 541KB，可进一步拆分）
+
+---
+
+**Last Updated**: 2026-11-03（P3：删除 md-bridge/kanban 路由与前端 api 模块，数据层只留 workspace.md）
+**Related**: [DATA_SOURCE.md](DATA_SOURCE.md)、[MD_ICS_BRIDGE.md](MD_ICS_BRIDGE.md)、[README.md](README.md)

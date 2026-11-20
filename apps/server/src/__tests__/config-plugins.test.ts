@@ -165,7 +165,7 @@ describe("配置 API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ai: { model: "gpt-x" } }),
     });
-    const j = await res.json();
+    const j: any = await res.json();
     expect(j.success).toBe(true);
     expect(j.config.ai.model).toBe("gpt-x");
 
@@ -200,7 +200,7 @@ describe("配置 API", () => {
       body: JSON.stringify({ evilSection: { hack: "/etc" } }),
     });
     // 未在 WRITABLE_SECTIONS 里，应该被忽略
-    const j = await (await fetch(`${base}/api/config`)).json();
+    const j: any = await (await fetch(`${base}/api/config`)).json();
     expect(j.config.evilSection).toBeUndefined();
 
     server.close();
@@ -215,10 +215,10 @@ describe("配置 API", () => {
     await fetch(`${base}/api/config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paths: { eventsFile: "./custom-events.md" } }),
+      body: JSON.stringify({ paths: { workspaceFile: "./custom-workspace.md" } }),
     });
-    const j = await (await fetch(`${base}/api/config`)).json();
-    expect(j.config.paths.eventsFile).toBe("./custom-events.md");
+    const j: any = await (await fetch(`${base}/api/config`)).json();
+    expect(j.config.paths.workspaceFile).toBe("./custom-workspace.md");
 
     server.close();
   });
@@ -274,25 +274,24 @@ describe("配置层与各模块的联动（防止「界面改了不生效」）"
   });
 
   it("数据路径：环境变量优先于 config.json", () => {
-    const savedEnv = process.env.MD_EVENTS_FILE;
+    const savedEnv = process.env.WORKSPACE_FILE;
     try {
-      cfg.saveConfig({ paths: { eventsFile: "./from-config.md" } } as any);
+      cfg.saveConfig({ paths: { workspaceFile: "./from-config.md" } } as any);
       // 无环境变量时用 config.json
-      delete process.env.MD_EVENTS_FILE;
-      expect(cfg.resolveDataPath("events")).toContain("from-config.md");
+      delete process.env.WORKSPACE_FILE;
+      expect(cfg.resolveDataPath("workspace")).toContain("from-config.md");
 
       // 有环境变量时环境变量优先
-      process.env.MD_EVENTS_FILE = "./from-env.md";
-      expect(cfg.resolveDataPath("events")).toContain("from-env.md");
+      process.env.WORKSPACE_FILE = "./from-env.md";
+      expect(cfg.resolveDataPath("workspace")).toContain("from-env.md");
     } finally {
-      if (savedEnv === undefined) delete process.env.MD_EVENTS_FILE;
-      else process.env.MD_EVENTS_FILE = savedEnv;
+      if (savedEnv === undefined) delete process.env.WORKSPACE_FILE;
+      else process.env.WORKSPACE_FILE = savedEnv;
     }
   });
 
-  it("数据路径是绝对路径", () => {
-    expect(path.isAbsolute(cfg.resolveDataPath("events"))).toBe(true);
-    expect(path.isAbsolute(cfg.resolveDataPath("kanban"))).toBe(true);
+  it("数据路径是绝对路径，且只有统一数据源", () => {
+    expect(path.isAbsolute(cfg.resolveDataPath("workspace"))).toBe(true);
   });
 });
 
@@ -303,7 +302,7 @@ describe("插件扫描", () => {
     await new Promise((r) => server.once("listening", r));
     const base = `http://127.0.0.1:${(server.address() as any).port}`;
 
-    const j = await (await fetch(`${base}/api/plugins`)).json();
+    const j: any = await (await fetch(`${base}/api/plugins`)).json();
     expect(j.success).toBe(true);
     expect(j.plugins).toHaveLength(0);
 
@@ -330,7 +329,7 @@ describe("插件扫描", () => {
     await new Promise((r) => server.once("listening", r));
     const base = `http://127.0.0.1:${(server.address() as any).port}`;
 
-    const j = await (await fetch(`${base}/api/plugins`)).json();
+    const j: any = await (await fetch(`${base}/api/plugins`)).json();
     expect(j.plugins).toHaveLength(1);
     expect(j.plugins[0].id).toBe("demo");
     expect(j.plugins[0].__hasComponent).toBe(true);
@@ -351,7 +350,7 @@ describe("插件扫描", () => {
     await new Promise((r) => server.once("listening", r));
     const base = `http://127.0.0.1:${(server.address() as any).port}`;
 
-    const j = await (await fetch(`${base}/api/plugins`)).json();
+    const j: any = await (await fetch(`${base}/api/plugins`)).json();
     expect(j.plugins).toHaveLength(1);
     expect(j.plugins[0].id).toBe("good");
     expect(j.errors.length).toBeGreaterThan(0);
@@ -370,7 +369,7 @@ describe("插件扫描", () => {
     await new Promise((r) => server.once("listening", r));
     const base = `http://127.0.0.1:${(server.address() as any).port}`;
 
-    const j = await (await fetch(`${base}/api/plugins`)).json();
+    const j: any = await (await fetch(`${base}/api/plugins`)).json();
     expect(j.plugins).toHaveLength(0);
     expect(j.errors[0].error).toMatch(/id/);
 
@@ -393,7 +392,7 @@ describe("插件扫描", () => {
     await new Promise((r) => server.once("listening", r));
     const base = `http://127.0.0.1:${(server.address() as any).port}`;
 
-    const j = await (await fetch(`${base}/api/plugins`)).json();
+    const j: any = await (await fetch(`${base}/api/plugins`)).json();
     expect(j.plugins).toHaveLength(1);
     expect(j.plugins[0].__hasComponent).toBe(false);
     expect(j.errors[0].warning).toBe(true);
@@ -404,13 +403,16 @@ describe("插件扫描", () => {
 
 describe("插件 manifest 校验", () => {
   it("合法 manifest 通过", async () => {
-    const { validateManifest } = await import("../framework/plugins.js").catch(
-      () => ({ validateManifest: null as any }),
-    );
+    // validateManifest 属于 renderer 的前端模块，server 侧没有这个文件；
+    // 用变量化模块名，避免 TS 在编译期解析一个不存在的相对路径。
+    const modulePath = "../framework/plugins.js";
+    const mod = (await import(/* @vite-ignore */ modulePath).catch(() => null)) as {
+      validateManifest?: (manifest: unknown) => string | null;
+    } | null;
     // 前端模块在 vitest（node 环境）下可能加载不到，跳过断言
-    if (!validateManifest) return;
+    if (!mod?.validateManifest) return;
     expect(
-      validateManifest({ id: "ok", name: "OK", status: "active" }),
+      mod.validateManifest({ id: "ok", name: "OK", status: "active" }),
     ).toBeNull();
   });
 });

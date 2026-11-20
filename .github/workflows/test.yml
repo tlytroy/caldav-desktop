@@ -6,87 +6,121 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  # 与本地开发/ Docker 镜像保持一致；升级时三处一起改（SDS §3.7）
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.8.0"
+  # 国内 runner 不受影响；海外 runner 走官方源。需要镜像时改这里或加 secret。
+  NPM_REGISTRY: "https://registry.npmjs.org"
+
 jobs:
   test:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        node-version: [20.x]
-
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
       with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'pnpm'
+        node-version: ${{ env.NODE_VERSION }}
 
-    - name: Install pnpm
-      run: npm install -g pnpm
-
-    - name: Install dependencies
-      run: pnpm install
-
-    - name: Run tests
+    # 固定 pnpm 版本：lockfile 与 pnpm 版本强相关，`npm i -g pnpm` 会随上游漂移
+    - name: Install pnpm ${{ env.PNPM_VERSION }}
       run: |
-        cd apps/server
-        pnpm test
-        cd ../..
+        npm install -g pnpm@${{ env.PNPM_VERSION }}
+        pnpm --version
 
-        cd apps/renderer
-        pnpm test
-        cd ../..
+    # --frozen-lockfile：lockfile 与 package.json 不一致时直接失败，
+    # 避免 CI 静默改依赖导致本地与线上行为分叉
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile --registry=${{ env.NPM_REGISTRY }}
 
+    # 类型检查必须保留：这是唯一能挡住「测试通过但类型漂移」的门禁
     - name: Type check
       run: |
-        cd apps/server
-        pnpm typecheck
-        cd ../..
+        pnpm -C apps/server typecheck
+        pnpm -C apps/renderer typecheck
 
-        cd apps/renderer
-        pnpm typecheck
-        cd ../..
+    - name: Test server
+      run: pnpm -C apps/server test
+
+    - name: Test renderer
+      run: pnpm -C apps/renderer test
+
+  # 端到端验收：起一个隔离的临时服务（临时 WORKSPACE_FILE / config.json / API_TOKEN），
+  # 跑 scripts/run-e2e.sh 里的两个验收脚本。历史上这两个脚本因为没带 token 而整片 401，
+  # 所以这一步同时也是「鉴权没把验收脚本打死」的回归门禁。
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Install pnpm ${{ env.PNPM_VERSION }}
+      run: |
+        npm install -g pnpm@${{ env.PNPM_VERSION }}
+        pnpm --version
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile --registry=${{ env.NPM_REGISTRY }}
+
+    - name: Build server
+      run: pnpm -C apps/server build
+
+    - name: Run acceptance suite (isolated service)
+      run: bash scripts/run-e2e.sh
 
   build:
     needs: test
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Use Node.js 20.x
-      uses: actions/setup-node@v3
+    - name: Use Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
       with:
-        node-version: '20.x'
-        cache: 'pnpm'
+        node-version: ${{ env.NODE_VERSION }}
 
-    - name: Install pnpm
-      run: npm install -g pnpm
+    - name: Install pnpm ${{ env.PNPM_VERSION }}
+      run: |
+        npm install -g pnpm@${{ env.PNPM_VERSION }}
+        pnpm --version
 
     - name: Install dependencies
-      run: pnpm install
+      run: pnpm install --frozen-lockfile --registry=${{ env.NPM_REGISTRY }}
 
-    - name: Build applications
-      run: |
-        cd apps/server
-        pnpm build
-        cd ../..
+    - name: Build server
+      run: pnpm -C apps/server build
 
-        cd apps/renderer
-        pnpm build
-        cd ../..
+    # 前端构建必须显式清空 VITE_API_URL：仓库里 apps/renderer/.env 指向 localhost:3001，
+    # 打进产物后 Electron / Docker 都会连错地址（SDS §3.6 / B3）。
+    - name: Build renderer
+      env:
+        VITE_API_URL: ""
+      run: pnpm -C apps/renderer build
 
-        cd apps/desktop
-        pnpm build
-        cd ../..
+    # `pnpm build` 只做 tsc + 资源复制 + esbuild 打服务端 bundle，
+    # **不跑 electron-builder**，所以不会生成 dist-electron/。
+    # 真正要出安装包时用 `pnpm -C apps/desktop package`（需要图形/系统依赖，
+    # 且体积大，不放在每次 push 的 CI 里）。
+    - name: Build desktop
+      run: pnpm -C apps/desktop build
 
+    # v3 已退役（2025-01 起不再接收新任务），必须用 v4
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-artifacts
         path: |
           apps/server/dist/
           apps/renderer/dist/
-          apps/desktop/dist-electron/
+          apps/desktop/dist-server/
+        retention-days: 7

@@ -1,5 +1,5 @@
 import React from "react";
-import { Calendar, GitBranch, Bell, BrainCircuit, ListTodo } from "lucide-react";
+import { Calendar, Cloud, Bell, BrainCircuit, ListTodo } from "lucide-react";
 import type { CalendarModule } from "../framework";
 
 /**
@@ -52,7 +52,7 @@ const CalendarModule: CalendarModule = {
   id: "calendar",
   name: "日历",
   version: "1.0.0",
-  description: "CalDAV 日历事件管理，支持多日历、事件 CRUD、同步",
+  description: "统一数据源的日历视图：多日历渲染、事件 CRUD、RRULE 展开",
   icon: React.createElement(Calendar, { className: "w-5 h-5" }),
   status: "active",
   order: 2,
@@ -74,12 +74,12 @@ const CalendarModule: CalendarModule = {
   ],
 };
 
-// ---- Tasks - 任务看板模块（活跃，工作搭子集成） ----
+// ---- Tasks - 任务看板模块（活跃） ----
 const TasksModule: CalendarModule = {
   id: "tasks",
   name: "任务",
   version: "1.0.0",
-  description: "工作搭子任务看板：添加/勾选任务，并与日历双向集成",
+  description: "统一数据源的看板视图：清单分组、子任务进度、勾选完成",
   icon: React.createElement(ListTodo, { className: "w-5 h-5" }),
   status: "active",
   order: 1,
@@ -101,37 +101,30 @@ const TasksModule: CalendarModule = {
   ],
 };
 
-// ---- GitSync - 多通道同步模块（占位） ----
-const GitSyncModule: CalendarModule = {
-  id: "git-sync",
-  name: "多通道同步",
-  version: "0.0.0",
-  description: "WebDAV + Git 双通道同步日历数据，支持自建服务器与 GitHub",
-  icon: React.createElement(GitBranch, { className: "w-5 h-5" }),
-  status: "placeholder",
+// ---- Sync - 同步中心（只读概览） ----
+// 只读本地快照，不联网；未配置同步也能正常用。
+const SyncModule: CalendarModule = {
+  id: "sync",
+  name: "同步中心",
+  version: "0.1.0",
+  description: "CalDAV / WebDAV 同步状态、最近事件与冲突（只读，不阻塞本地使用）",
+  icon: React.createElement(Cloud, { className: "w-5 h-5" }),
+  status: "active",
   order: 3,
-  placeholder: {
-    title: "多通道同步",
-    description:
-      "WebDAV 同步主通道 + Git 仓库备份/同步副通道。Git 通道可白嫖 GitHub 私有仓库作为备份，实现跨设备配置同步。",
-    plannedVersion: "2.0.0",
-    eta: "TBD",
-  },
   routes: [
     {
-      path: "/git-sync",
-      component: React.lazy(() => import("./placeholder")),
-      title: "多通道同步",
+      path: "/sync",
+      component: React.lazy(() => import("./sync")),
+      title: "同步中心",
       showInNav: true,
     },
   ],
   navItems: [
     {
-      id: "nav-git-sync",
-      label: "多通道同步",
-      icon: React.createElement(GitBranch, { className: "w-5 h-5" }),
-      path: "/git-sync",
-      status: "placeholder",
+      id: "nav-sync",
+      label: "同步中心",
+      icon: React.createElement(Cloud, { className: "w-5 h-5" }),
+      path: "/sync",
     },
   ],
 };
@@ -171,26 +164,20 @@ const AIAgentModule: CalendarModule = {
   ],
 };
 
-// ---- Notifications - 多渠道通知模块（占位） ----
+// ---- Notifications - 本地提醒模块（活跃） ----
+// 不依赖服务器：到点弹应用内卡片，可选桌面通知。
 const NotificationsModule: CalendarModule = {
   id: "notifications",
   name: "通知推送",
-  version: "0.0.0",
-  description: "日历事件提醒，支持企业微信、邮箱、Server酱等多渠道推送",
+  version: "0.1.0",
+  description: "本地提醒：到点弹卡片、稍后 10 分钟、可选桌面通知",
   icon: React.createElement(Bell, { className: "w-5 h-5" }),
-  status: "placeholder",
+  status: "active",
   order: 5,
-  placeholder: {
-    title: "通知推送",
-    description:
-      "事件提醒与推送通知。支持企业微信机器人、邮箱、Server酱、PushPlus、Bark 等常用推送渠道。可自定义提醒规则。",
-    plannedVersion: "2.2.0",
-    eta: "TBD",
-  },
   routes: [
     {
       path: "/notifications",
-      component: React.lazy(() => import("./placeholder")),
+      component: React.lazy(() => import("./notifications")),
       title: "通知推送",
       showInNav: true,
     },
@@ -201,7 +188,6 @@ const NotificationsModule: CalendarModule = {
       label: "通知推送",
       icon: React.createElement(Bell, { className: "w-5 h-5" }),
       path: "/notifications",
-      status: "placeholder",
     },
   ],
 };
@@ -211,7 +197,7 @@ export const builtinModules: CalendarModule[] = [
   DashboardModule,
   TasksModule,
   CalendarModule,
-  GitSyncModule,
+  SyncModule,
   AIAgentModule,
   NotificationsModule,
 ];

@@ -1,0 +1,25 @@
+# 构建镜像时不需要的东西（也是防止把密钥打进镜像）
+.git
+.github
+node_modules
+**/node_modules
+**/dist
+**/dist-electron
+apps/renderer/android
+apps/renderer/dev-dist
+apps/desktop/dist-electron
+.vscode
+REF
+docs
+*.log
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+config.json
+workspace.md
+.workspace-backups
+.webdav-state.json
+.caldav-sync-state.json
+.reminder-state.json

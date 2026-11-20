@@ -25,10 +25,18 @@ import {
   Check,
 } from 'lucide-react';
 import type { WorkbenchItem } from '../api/workspace';
+import { addDays, addHours, localDate, toLocalIso } from '../utils/date';
+import {
+  computeRemindAt,
+  describeRemind,
+  presetValueOf,
+  reminderBase,
+  REMIND_PRESETS,
+} from '../utils/reminders';
 import {
   fetchRecurrenceOptions,
   importIcs,
-  exportIcsDownloadUrl,
+  downloadIcs,
   type RecurrenceOption,
   type IcsImportPreview,
 } from '../api/workspace';
@@ -36,10 +44,15 @@ import {
   fetchWebDAVStatus,
   pushToWebDAV,
   pullFromWebDAV,
+  mergeWebDAV,
   testWebDAVConnection,
   type WebDAVStatus,
   type WebDAVSyncResult,
 } from '../api/webdav';
+import {
+  caldavErrorMessage,
+  type CalDAVSyncResult,
+} from '../api/caldav-sync';
 
 /** 优先级 → 日历色块 */
 const MD_PRIORITY_COLOR: Record<'high' | 'mid' | 'low', string> = {
@@ -106,6 +119,10 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
     tags: any[];
     recurrence?: any;
     kind?: 'task' | 'event';
+    /** 提醒绝对时间（本地串） */
+    remind?: string;
+    /** 提醒选择器：none / 数字（提前分钟）/ custom */
+    remindPreset?: string;
   }>({
     title: '',
     start: new Date(),
@@ -113,13 +130,18 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
     allDay: false,
     description: '',
     tags: [],
+    remindPreset: 'none',
   });
   // 重复规则选项（从服务端取，保证 RRULE 表述一致）
   const [recurrenceOptions, setRecurrenceOptions] = useState<RecurrenceOption[]>([
     { value: '', label: '不重复' },
   ]);
   // 删除确认
-  const [pendingDelete, setPendingDelete] = useState<{ uid: string; title: string } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    uid: string;
+    title: string;
+    recurring?: boolean;
+  } | null>(null);
 
   // ===== iCalendar 导入 / 导出 =====
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -132,9 +154,14 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
   // ===== WebDAV 同步 =====
   const [webdavOpen, setWebdavOpen] = useState(false);
   const [webdavStatus, setWebdavStatus] = useState<WebDAVStatus | null>(null);
-  const [webdavBusy, setWebdavBusy] = useState<'push' | 'pull' | 'test' | null>(null);
+  const [webdavBusy, setWebdavBusy] = useState<
+    'push' | 'pull' | 'merge' | 'test' | null
+  >(null);
   const [webdavResults, setWebdavResults] = useState<WebDAVSyncResult[] | null>(null);
   const [webdavMsg, setWebdavMsg] = useState<string | null>(null);
+
+  // ===== CalDAV 同步结果（推送 / 拉取 / 双向） =====
+  const [syncResult, setSyncResult] = useState<CalDAVSyncResult | null>(null);
 
   const loadWebdavStatus = async () => {
     try {
@@ -202,12 +229,39 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
       setWebdavResults(r.results);
       setWebdavMsg(describeSyncResults(r.results));
       await loadWebdavStatus();
-      // 拉取会覆盖 events.md，必须重读本地数据
-      if (r.results.some((x) => x.key === 'events' && x.ok)) {
+      // 拉取会覆盖 workspace.md，必须重读本地数据
+      // 同步的文件现在只有 workspace.md（旧 key 是 events / kanban）
+      if (r.results.some((x) => (x.key === 'workspace' || x.key === 'events') && x.ok)) {
         await loadEvents();
       }
     } catch (e) {
       setWebdavMsg('拉取失败：' + (e as Error).message);
+    } finally {
+      setWebdavBusy(null);
+    }
+  };
+
+  /** 冲突时的第三个选项：按条目并集合并，两端写同一份 */
+  const handleWebdavMerge = async () => {
+    setWebdavBusy('merge');
+    setWebdavMsg(null);
+    setWebdavResults(null);
+    try {
+      const r = await mergeWebDAV();
+      const m = r.merged;
+      setWebdavMsg(
+        `合并完成：共 ${m.total} 条（只在本地 ${m.localOnly} / 只在远端 ${m.remoteOnly}）；` +
+          `采用远端新版 ${m.fromRemote} 条，保留本地新版 ${m.fromLocal} 条` +
+          (m.conflicts.length
+            ? `；${m.conflicts.length} 条时间相同但内容不同，已保留本地`
+            : ''),
+      );
+      await loadWebdavStatus();
+      await loadEvents();
+    } catch (e: any) {
+      setWebdavMsg(
+        '合并失败：' + (e?.response?.data?.error || (e as Error).message),
+      );
     } finally {
       setWebdavBusy(null);
     }
@@ -257,6 +311,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
       allDay: !!info.allDay,
       description: '',
       tags: [],
+      remindPreset: 'none',
     });
     setShowModal(true);
   };
@@ -266,38 +321,90 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
     // 展开重复规则后，实例 id 形如 "abc@2026-10-05"；原始 id 在 instanceId 里
     const originalId = info.event.extendedProps?.item?.instanceId || id.split('@')[0];
     const e = events.find((ev) => (ev.instanceId || ev.id) === originalId);
-    if (e) {
-      setFormData({
-        uid: originalId,
-        title: e.title || '',
-        start: e.start ? new Date(e.start) : new Date(),
-        end: e.end ? new Date(e.end) : e.start ? new Date(e.start) : new Date(),
-        allDay: !!e.allDay,
-        description: e.description || '',
-        category: e.project,
-        tags: e.tags || [],
-        recurrence: e.recurrence,
-      });
-      setShowModal(true);
+    if (!e) return;
+
+    // ⚠️ 重复事件必须用**系列原始起点**（seriesStart），不能用「被点的那一次」——
+    // 否则保存时会把整个系列的锚点挪到那一天。
+    const start = new Date(e.seriesStart || e.start || Date.now());
+    let end = e.seriesEnd
+      ? new Date(e.seriesEnd)
+      : e.end
+        ? new Date(e.end)
+        : new Date(start.getTime() + (e.allDay ? 86400000 : 3600000));
+    if (end.getTime() <= start.getTime()) {
+      end = new Date(start.getTime() + (e.allDay ? 86400000 : 3600000));
     }
+
+    setFormData({
+      uid: originalId,
+      title: e.title || '',
+      start,
+      end,
+      allDay: !!e.allDay,
+      description: e.description || '',
+      category: e.project,
+      tags: e.tags || [],
+      recurrence: e.recurrence,
+      // 不保留 kind 的话，编辑一个「任务」会被静默改成「事件」→ 从看板消失
+      kind: e.kind,
+      remind: e.remind,
+      remindPreset: presetValueOf(
+        e.remind,
+        reminderBase({ start: toLocalIso(start), allDay: !!e.allDay }),
+      ),
+    });
+    setShowModal(true);
+  };
+
+  /**
+   * 开始时间 / 全天变化时，如果提醒选的是预设（提前 N 分钟），
+   * 跟着重算提醒时间；自定义时间不自动改，避免覆盖用户手填的值。
+   */
+  const withRemind = (next: typeof formData): typeof formData => {
+    const p = next.remindPreset;
+    if (!p || p === 'none' || p === 'custom') return next;
+    const base = reminderBase({
+      start: toLocalIso(next.start),
+      allDay: next.allDay,
+    });
+    if (!base) return next;
+    return { ...next, remind: computeRemindAt(base, parseInt(p, 10)) };
   };
 
   const handleSubmit = async () => {
     if (!formData.title.trim()) return;
     try {
       setShowModal(false);
-      // 本地时间字符串（不带 Z）—— 统一数据源用本地时间，避免时区偏移
-      const toLocalIso = (d: Date) => {
-        const p = (n: number) => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
-          d.getHours(),
-        )}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-      };
+
+      // 结束时间必须晚于开始：全天按次日算（与 ICS 的排他边界一致），
+      // 定时事件至少 +1 小时。否则服务端校验直接拒绝，用户只看到「保存失败」。
+      let endDate = formData.end;
+      if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) {
+        endDate = addHours(formData.start, 1);
+      }
+      if (endDate.getTime() <= formData.start.getTime()) {
+        endDate = formData.allDay
+          ? addDays(formData.start, 1)
+          : addHours(formData.start, 1);
+      }
+
+      // 提醒：预设值以「开始时间」为基准重新算一次，保证与最终保存的时间一致
+      let remindValue: string | undefined = formData.remind;
+      const remindPreset = formData.remindPreset;
+      if (remindPreset && remindPreset !== 'none' && remindPreset !== 'custom') {
+        const base = reminderBase({
+          start: toLocalIso(formData.start),
+          allDay: formData.allDay,
+        });
+        if (base) remindValue = computeRemindAt(base, parseInt(remindPreset, 10));
+      }
+
       const itemPayload: any = {
         title: formData.title,
         start: toLocalIso(formData.start),
-        end: toLocalIso(formData.end),
+        end: toLocalIso(endDate),
         allDay: formData.allDay,
+        remind: remindValue || null,
         description: formData.description,
         // CategorySelector 给的是 {name,color}，这里取名字
         project: formData.category?.name || formData.category || undefined,
@@ -326,6 +433,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
       setPendingDelete({
         uid: formData.uid,
         title: formData.title,
+        recurring: !!formData.recurrence,
       });
       setShowDeleteConfirm(true);
     }
@@ -347,12 +455,31 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
     }
   };
 
-  const handleSync = async (kind: 'push' | 'pull' | 'bidir') => {
+  /**
+   * CalDAV 同步（workspace.md ↔ CalDAV）。
+   *
+   * 失败必须显示原因 —— 以前这里把错误吞掉，用户以为同步成功了，
+   * 实际上推的是废弃的 events.md。
+   */
+  const handleSync = async (
+    kind: 'push' | 'pull' | 'bidir',
+    force = false,
+    uids?: string[],
+    merge = false,
+  ) => {
     setSyncing(kind);
+    setSyncResult(null);
+    setIoMsg(null);
     try {
-      if (kind === 'push') await pushToCaldav();
-      else if (kind === 'pull') await pullFromCaldav();
-      else await bidirectionalSync();
+      const r =
+        kind === 'push'
+          ? await pushToCaldav(force, uids)
+          : kind === 'pull'
+            ? await pullFromCaldav(force, uids)
+            : await bidirectionalSync(force, uids, merge);
+      setSyncResult(r);
+    } catch (e) {
+      setIoMsg('CalDAV 同步失败：' + caldavErrorMessage(e));
     } finally {
       setSyncing(null);
     }
@@ -411,19 +538,24 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
     setPendingIcsText(null);
   };
 
-  const handleExport = () => {
-    window.open(exportIcsDownloadUrl(), '_blank');
-    setIoMsg('已导出 .ics 文件，可用其他日历软件导入');
+  const handleExport = async () => {
+    try {
+      await downloadIcs();
+      setIoMsg('已导出 .ics 文件，可用其他日历软件导入');
+    } catch (err) {
+      setIoMsg(err instanceof Error ? `导出失败：${err.message}` : '导出失败');
+    }
   };
 
   const formatTime = (date: Date) => date.toTimeString().slice(0, 5);
-  const formatDate = (date: Date) => date.toISOString().split('T')[0];
+  // 不能用 toISOString：它是 UTC，东八区 00:00-08:00 会把日期显示成前一天
+  const formatDate = (date: Date) => localDate(date);
 
   // ---- Loading skeleton ----
   if (loadingState === 'loading') {
     return (
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-6 relative">
-        <LoadingSpinner message="加载 events.md 中..." />
+        <LoadingSpinner message="加载 workspace.md 中..." />
       </div>
     );
   }
@@ -433,7 +565,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
     return (
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-red-200 dark:border-red-900/40 shadow-sm p-6">
         <div className="text-red-600 dark:text-red-400 text-sm">
-          读取 events.md 失败：{error}
+          读取 workspace.md 失败：{error}
         </div>
         <button
           onClick={loadEvents}
@@ -450,7 +582,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
       {/* 工具栏：同步按钮 + 上次同步时间 */}
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3 pb-3 border-b border-gray-100 dark:border-neutral-800">
         <div className="text-xs text-gray-500 dark:text-gray-400">
-          数据源：本地 <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800">events.md</code>
+          数据源：本地 <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800">workspace.md</code>
           {lastSyncTime && (
             <span className="ml-2">
               · 上次同步 {new Date(lastSyncTime).toLocaleString('zh-CN')}
@@ -462,7 +594,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
             onClick={() => handleSync('push')}
             disabled={syncing !== null}
             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-700 disabled:opacity-50"
-            title="把 events.md 推送到 CalDAV"
+            title="把 workspace.md 转成 ICS 推送到 CalDAV"
           >
             <Cloud className="w-3.5 h-3.5" />
             推送 CalDAV
@@ -471,7 +603,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
             onClick={() => handleSync('pull')}
             disabled={syncing !== null}
             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-700 disabled:opacity-50"
-            title="从 CalDAV 拉取并合并到 events.md"
+            title="从 CalDAV 拉取并合并到 workspace.md"
           >
             <CloudOff className="w-3.5 h-3.5" />
             拉取
@@ -480,7 +612,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
             onClick={() => handleSync('bidir')}
             disabled={syncing !== null}
             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-brand text-white hover:opacity-90 disabled:opacity-50"
-            title="双向同步 events.md ↔ CalDAV"
+            title="双向同步 workspace.md ↔ CalDAV"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${syncing === 'bidir' ? 'animate-spin' : ''}`} />
             双向同步
@@ -489,7 +621,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
             onClick={() => fileInputRef.current?.click()}
             disabled={importing}
             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-700 disabled:opacity-50"
-            title="导入 .ics 文件到 events.md"
+            title="导入 .ics 文件到 workspace.md"
           >
             <Upload className="w-3.5 h-3.5" />
             导入 ICS
@@ -497,7 +629,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
           <button
             onClick={handleExport}
             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-neutral-700"
-            title="导出 events.md 为 .ics 文件"
+            title="导出 workspace.md 为 .ics 文件"
           >
             <Download className="w-3.5 h-3.5" />
             导出 ICS
@@ -512,6 +644,96 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
           </button>
         </div>
       </div>
+
+      {/* CalDAV 同步结果（冲突不静默吞掉，给用户两个明确选择） */}
+      {syncResult && (
+        <div
+          className={`mb-3 p-2.5 rounded-lg border text-xs ${
+            syncResult.conflicts.length || syncResult.errors.length
+              ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
+              : 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            <span className="flex-1">
+              CalDAV 同步完成：推送 {syncResult.pushed.length} 条，拉取{' '}
+              {syncResult.pulled.length} 条，合并 {syncResult.merged?.length ?? 0} 条，
+              跳过 {syncResult.skipped} 条
+              {syncResult.conflicts.length > 0 &&
+                `，冲突 ${syncResult.conflicts.length} 条`}
+              {syncResult.errors.length > 0 &&
+                `，失败 ${syncResult.errors.length} 条`}
+            </span>
+            <button
+              onClick={() => setSyncResult(null)}
+              className="shrink-0 hover:underline"
+            >
+              关闭
+            </button>
+          </div>
+          {syncResult.conflicts.length > 0 && (
+            <>
+              <ul className="mt-2 space-y-1 list-disc pl-4">
+                {syncResult.conflicts.map((c) => (
+                  <li key={c.uid}>
+                    <span className="font-medium">{c.title}</span> — {c.reason}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() =>
+                    handleSync(
+                      'pull',
+                      true,
+                      syncResult.conflicts.map((c) => c.uid),
+                    )
+                  }
+                  disabled={syncing !== null}
+                  className="px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/40 hover:opacity-80 disabled:opacity-50"
+                >
+                  冲突项以远端为准
+                </button>
+                <button
+                  onClick={() =>
+                    handleSync(
+                      'push',
+                      true,
+                      syncResult.conflicts.map((c) => c.uid),
+                    )
+                  }
+                  disabled={syncing !== null}
+                  className="px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/40 hover:opacity-80 disabled:opacity-50"
+                >
+                  冲突项以本地为准
+                </button>
+                <button
+                  onClick={() =>
+                    handleSync(
+                      'bidir',
+                      false,
+                      syncResult.conflicts.map((c) => c.uid),
+                      true,
+                    )
+                  }
+                  disabled={syncing !== null}
+                  className="px-2 py-1 rounded bg-amber-100 dark:bg-amber-900/40 hover:opacity-80 disabled:opacity-50"
+                  title="本地改过的字段保留，只有远端改的字段采纳；两边都改的字段保留本地并在结果里标出"
+                >
+                  合并双方改动
+                </button>
+              </div>
+            </>
+          )}
+          {syncResult.errors.length > 0 && (
+            <ul className="mt-2 space-y-1 list-disc pl-4">
+              {syncResult.errors.map((err, i) => (
+                <li key={i}>{err}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* 隐藏的文件选择 input */}
       <input
@@ -605,7 +827,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
                   替换而非追加
                 </span>
                 <span className="block text-xs text-amber-600 dark:text-amber-400 mt-1">
-                  默认追加到现有事件之后；勾选后会先清空 events.md 里的全部事件，
+                  默认追加到现有条目之后；勾选后会先清空 workspace.md 里的全部条目，
                   仅保留本次导入的内容。此操作不可撤销。
                 </span>
               </span>
@@ -639,8 +861,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
       >
         <div className="space-y-4">
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            直接把 <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800">events.md</code>
-            与 <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800">工作搭子看板.md</code>
+            直接把 <code className="px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800">workspace.md</code>
             同步到 WebDAV 服务器（Nextcloud / 坚果云 / ownCloud 等）。
             <span className="block mt-1">
               与 CalDAV 通道不同，这里<strong>不经过 ICS 转换</strong>，md 格式原样上传。
@@ -665,7 +886,7 @@ export default function Calendar({ calendarUrl, refreshKey }: CalendarProps) {
 {`WEBDAV_URL=https://dav.example.com/remote.php/dav/files/user
 WEBDAV_USER=your_username
 WEBDAV_PASS=your_password
-WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
+WEBDAV_EVENTS_PATH=CalDAV-Desktop`}
                     </pre>
                     配置后重启后端服务。
                   </div>
@@ -755,6 +976,15 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
                   <HardDriveDownload className="w-4 h-4" />
                   {webdavBusy === 'pull' ? '拉取中…' : '从 WebDAV 拉取'}
                 </button>
+                <button
+                  onClick={handleWebdavMerge}
+                  disabled={webdavBusy !== null}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg hover:opacity-90 disabled:opacity-50"
+                  title="按条目 id 合并：两边独有都保留，同一条目用较新的一版"
+                >
+                  <HardDrive className="w-4 h-4" />
+                  {webdavBusy === 'merge' ? '合并中…' : '合并双方条目'}
+                </button>
               </div>
 
               <p className="text-xs text-gray-400">
@@ -775,22 +1005,29 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
                   {hasConflict && (
                     <div className="mt-2 pt-2 border-t border-amber-200 dark:border-amber-800">
                       <div className="mb-1.5">
-                        远端有更新。建议先「拉取」查看远端内容，再决定是否覆盖。
+                        远端有更新。三选一：以本地为准 / 以远端为准 / 合并双方条目。
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => handleWebdavPush(true)}
                           disabled={webdavBusy !== null}
                           className="px-2.5 py-1 rounded bg-amber-600 text-white hover:opacity-90 disabled:opacity-50"
                         >
-                          仍然用本地覆盖远端
+                          以本地为准
                         </button>
                         <button
-                          onClick={() => handleWebdavPull(false)}
+                          onClick={() => handleWebdavPull(true)}
                           disabled={webdavBusy !== null}
                           className="px-2.5 py-1 rounded bg-white dark:bg-neutral-800 text-amber-700 dark:text-amber-300 hover:opacity-80 disabled:opacity-50"
                         >
-                          改用远端内容
+                          以远端为准
+                        </button>
+                        <button
+                          onClick={handleWebdavMerge}
+                          disabled={webdavBusy !== null}
+                          className="px-2.5 py-1 rounded bg-white dark:bg-neutral-800 text-amber-700 dark:text-amber-300 hover:opacity-80 disabled:opacity-50"
+                        >
+                          合并双方条目
                         </button>
                       </div>
                     </div>
@@ -884,7 +1121,18 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
             <input
               type="checkbox"
               checked={formData.allDay}
-              onChange={(e) => setFormData({ ...formData, allDay: e.target.checked })}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                const next = { ...formData, allDay: checked };
+                // 勾上全天后，结束时间至少是次日（排他边界）
+                if (
+                  checked &&
+                  formData.end.getTime() <= formData.start.getTime()
+                ) {
+                  next.end = addDays(formData.start, 1);
+                }
+                setFormData(withRemind(next));
+              }}
               className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
             />
             全天事件
@@ -899,7 +1147,7 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
                 onChange={(e) => {
                   const ns = new Date(e.target.value);
                   ns.setHours(formData.start.getHours(), formData.start.getMinutes());
-                  setFormData({ ...formData, start: ns });
+                  setFormData(withRemind({ ...formData, start: ns }));
                 }}
                 className={`w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} bg-white dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand`}
               />
@@ -930,7 +1178,7 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
                     const [h, m] = e.target.value.split(':').map(Number);
                     const ns = new Date(formData.start);
                     ns.setHours(h, m);
-                    setFormData({ ...formData, start: ns });
+                    setFormData(withRemind({ ...formData, start: ns }));
                   }}
                   className={`w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} bg-white dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand`}
                 />
@@ -963,6 +1211,74 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
             />
           </div>
 
+          {/* 提醒 */}
+          <div className="border-t border-gray-100 dark:border-neutral-800 pt-3">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              提醒
+            </label>
+            <select
+              value={formData.remindPreset || 'none'}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === 'none') {
+                  setFormData({ ...formData, remindPreset: 'none', remind: undefined });
+                  return;
+                }
+                const base = reminderBase({
+                  start: toLocalIso(formData.start),
+                  allDay: formData.allDay,
+                });
+                if (v === 'custom') {
+                  setFormData({
+                    ...formData,
+                    remindPreset: 'custom',
+                    remind:
+                      formData.remind ||
+                      (base ? computeRemindAt(base, 30) : undefined),
+                  });
+                  return;
+                }
+                setFormData({
+                  ...formData,
+                  remindPreset: v,
+                  remind: base ? computeRemindAt(base, parseInt(v, 10)) : undefined,
+                });
+              }}
+              className={`w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} bg-white dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand`}
+            >
+              {REMIND_PRESETS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+              <option value="custom">自定义时间…</option>
+            </select>
+
+            {formData.remindPreset === 'custom' && (
+              <input
+                type="datetime-local"
+                value={(formData.remind || '').slice(0, 16)}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    remind: e.target.value ? `${e.target.value}:00` : undefined,
+                  })
+                }
+                className={`mt-2 w-full px-3 py-2 text-base border border-gray-300 dark:border-gray-600 ${borderRadius} bg-white dark:bg-neutral-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand`}
+              />
+            )}
+
+            {formData.remind ? (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                将于 {describeRemind(formData.remind)} 提醒（应用内；配了推送渠道也会发到手机）
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-gray-400">
+                提醒时间存在本地 workspace.md 里，不依赖服务器
+              </p>
+            )}
+          </div>
+
           {/* 重复规则 */}
           <div className="border-t border-gray-100 dark:border-neutral-800 pt-3">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -982,8 +1298,8 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
               ))}
             </select>
             {formData.recurrence && (
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                该条目会在日历上按此规则重复出现
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                重复事件：修改或删除会作用于整个系列（暂不支持「只改这一次」）
               </p>
             )}
           </div>
@@ -1068,6 +1384,11 @@ WEBDAV_EVENTS_PATH=CalDAV-Desktop/events.md`}
       >
         <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
           确定删除「{pendingDelete?.title}」吗？此操作会从统一数据源中移除该条目。
+          {pendingDelete?.recurring && (
+            <span className="block mt-1 text-amber-600 dark:text-amber-400">
+              这是一个重复事件，删除会移除整个系列。
+            </span>
+          )}
         </p>
         <div className="flex justify-end gap-2">
           <button

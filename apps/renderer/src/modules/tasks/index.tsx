@@ -12,6 +12,10 @@ import {
   Inbox,
   FolderOpen,
   ListChecks,
+  Pencil,
+  Search,
+  X,
+  Bell,
 } from "lucide-react";
 import {
   fetchItems,
@@ -20,11 +24,29 @@ import {
   deleteItem,
   fetchRecurrenceOptions,
   fetchLists,
+  renameList,
   type WorkbenchItem,
   type RecurrenceOption,
   type ListSummary,
 } from "../../api/workspace";
 import { Modal } from "../../components/ui/Modal";
+import {
+  addDays,
+  addHours,
+  dateOnly,
+  isOverdue as isOverdueDate,
+  localDate,
+  parseLocalDateTime,
+  timeOf,
+  toLocalIso,
+} from "../../utils/date";
+import {
+  computeRemindAt,
+  describeRemind,
+  presetValueOf,
+  reminderBase,
+  REMIND_PRESETS,
+} from "../../utils/reminders";
 
 const PRIORITY_META: Record<
   "high" | "mid" | "low",
@@ -48,13 +70,13 @@ const PRIORITY_META: Record<
 };
 
 /**
- * 逾期判定：截止日期当天不算逾期。
+ * 看板里的逾期判定：截止日当天不算逾期。
+ *
+ * 具体比较交给 utils/date（纯日期串必须按本地日解释，
+ * 直接用 new Date("2026-11-02") 会当成 UTC 午夜）。
  */
 function isOverdue(t: WorkbenchItem): boolean {
-  if (t.done || !t.due) return false;
-  const endOfToday = new Date();
-  endOfToday.setHours(23, 59, 59, 999);
-  return new Date(t.due).getTime() < endOfToday.getTime();
+  return isOverdueDate(t.due, t.done);
 }
 
 /**
@@ -97,6 +119,13 @@ export default function TasksPage() {
   const [recurrenceOptions, setRecurrenceOptions] = useState<RecurrenceOption[]>([
     { value: "", label: "不重复" },
   ]);
+  /** 搜索：标题 / 项目 / 清单 / 标签 */
+  const [query, setQuery] = useState("");
+  /** 正在编辑的任务；null = 新建模式 */
+  const [editing, setEditing] = useState<WorkbenchItem | null>(null);
+  /** 清单重命名 */
+  const [renameFrom, setRenameFrom] = useState<string | null>(null);
+  const [renameTo, setRenameTo] = useState("");
 
   // 表单
   const [title, setTitle] = useState("");
@@ -107,6 +136,10 @@ export default function TasksPage() {
   const [project, setProject] = useState("");
   const [recurrence, setRecurrence] = useState("");
   const [allDay, setAllDay] = useState(true);
+  /** 提醒绝对时间（本地串）；空 = 不提醒 */
+  const [remind, setRemind] = useState("");
+  /** none / 数字（提前分钟）/ custom */
+  const [remindPreset, setRemindPreset] = useState("none");
   // 删除确认
   const [pendingDelete, setPendingDelete] = useState<WorkbenchItem | null>(null);
 
@@ -145,70 +178,173 @@ export default function TasksPage() {
     setTimeout(() => setToast(null), 2200);
   };
 
+  /** 清空表单并切回新建模式 */
+  const resetForm = () => {
+    setEditing(null);
+    setTitle("");
+    setPriority("mid");
+    setDue("");
+    setTime("09:00");
+    setEndTime("10:00");
+    setProject("");
+    setRecurrence("");
+    setAllDay(true);
+    setRemind("");
+    setRemindPreset("none");
+    setNewList(activeList || "");
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditing(null);
+  };
+
+  /** 点任务标题 → 编辑（标题、清单、优先级、时间、重复都能改） */
+  const openEdit = (t: WorkbenchItem) => {
+    setEditing(t);
+    setTitle(t.title || "");
+    setPriority(t.priority || "mid");
+    setDue(dateOnly(t.due) || dateOnly(t.start) || "");
+    setAllDay(t.start ? !!t.allDay : true);
+    setTime(timeOf(t.start));
+    setEndTime(timeOf(t.end || t.start));
+    setProject(t.project || "");
+    setRecurrence(t.recurrence || "");
+    setNewList(t.list || "");
+    setRemind(t.remind || "");
+    setRemindPreset(
+      presetValueOf(
+        t.remind,
+        reminderBase({ start: t.start, due: t.due, allDay: t.allDay }),
+      ),
+    );
+    setShowForm(true);
+  };
+
+  /** 日期 / 时间 / 全天变化时，若提醒选的是预设，跟着重算 */
+  const syncRemind = (next: {
+    due: string;
+    time: string;
+    allDay: boolean;
+    preset: string;
+  }) => {
+    if (next.preset === "none" || next.preset === "custom") return;
+    const day = dateOnly(next.due);
+    if (!day) {
+      setRemind("");
+      return;
+    }
+    const start = next.allDay ? `${day}T00:00:00` : `${day}T${next.time}:00`;
+    const base = reminderBase({ start, allDay: next.allDay });
+    setRemind(base ? computeRemindAt(base, parseInt(next.preset, 10)) : "");
+  };
+
   const submit = async () => {
     if (!title.trim()) return;
     try {
       setSaving(true);
-      // 任务需要时间点才能出现在日历上 —— 这是"一处数据，两处显示"的前提
-      const hasTime = !!due;
-      const start = hasTime
-        ? allDay
-          ? `${due}T00:00:00`
-          : `${due}T${time}:00`
-        : undefined;
-      const end = hasTime
-        ? allDay
-          ? undefined
-          : `${due}T${endTime}:00`
-        : undefined;
 
-      await createItem({
+      // 任务需要时间点才能出现在日历上 —— 这是"一处数据，两处显示"的前提。
+      const day = dateOnly(due);
+      let start: string | undefined;
+      let end: string | undefined;
+
+      if (day) {
+        if (allDay) {
+          start = `${day}T00:00:00`;
+          end = undefined;
+        } else {
+          start = `${day}T${time}:00`;
+          const s = parseLocalDateTime(start)!;
+          // 结束时间不晚于开始 → 自动 +1 小时。
+          // 之前这里直接写同样的时间，服务端「end 必须晚于 start」必然拒绝，
+          // 于是「排期」按钮看起来能点、实际永远保存失败。
+          let e = parseLocalDateTime(`${day}T${endTime}:00`)!;
+          if (e.getTime() <= s.getTime()) e = addHours(s, 1);
+          end = toLocalIso(e);
+        }
+      }
+
+      // 提醒：预设值以最终保存的日期 / 时间为基准重算
+      let remindValue: string | undefined;
+      if (day && remindPreset !== "none") {
+        if (remindPreset === "custom") {
+          remindValue = remind || undefined;
+        } else {
+          const base = reminderBase({
+            start: allDay ? `${day}T00:00:00` : `${day}T${time}:00`,
+            allDay,
+          });
+          remindValue = base
+            ? computeRemindAt(base, parseInt(remindPreset, 10))
+            : undefined;
+        }
+      }
+
+      // null = 清空字段（服务端约定）；新建时 null 会被当成 undefined
+      const payload = {
         title: title.trim(),
-        kind: "task",
-        // 清单：跟随表单里选的值；选了「收件箱」就不写 list
-        list: newList || undefined,
+        kind: "task" as const,
+        list: newList.trim() || null,
         priority,
-        due: due || undefined,
-        start,
-        end,
+        due: day ?? null,
+        remind: remindValue ?? null,
+        start: start ?? null,
+        end: end ?? null,
         allDay,
-        project: project || undefined,
-        recurrence: recurrence || undefined,
-        done: false,
-      });
+        project: project.trim() || null,
+        recurrence: recurrence || null,
+      };
 
-      setTitle("");
-      setDue("");
-      setTime("09:00");
-      setEndTime("10:00");
-      setProject("");
-      setRecurrence("");
-      setNewList(activeList || "");
-      setShowForm(false);
-      showToast(hasTime ? "已添加任务" : "已添加任务（未设时间，不显示在日历）");
+      if (editing) {
+        await updateItem(editing.id, payload as any);
+        showToast("已保存修改");
+      } else {
+        await createItem({ ...payload, done: false } as any);
+        showToast(
+          day ? "已添加任务" : "已添加任务（未设时间，不显示在日历）",
+        );
+      }
+
+      closeForm();
       await load();
     } catch (e) {
-      showToast("添加失败：" + (e as Error).message);
+      showToast("保存失败：" + (e as Error).message);
     } finally {
       setSaving(false);
     }
   };
 
   const toggle = async (t: WorkbenchItem) => {
-    await updateItem(t.id, { done: !t.done });
-    await load();
+    try {
+      await updateItem(t.id, { done: !t.done });
+      await load();
+    } catch (e) {
+      showToast("操作失败：" + (e as Error).message);
+    }
   };
 
   /** 给任务补一个时间点 —— 补上后就出现在日历上了 */
   const setTaskTime = async (t: WorkbenchItem, date: string, timeStr: string) => {
-    await updateItem(t.id, {
-      start: `${date}T${timeStr}:00`,
-      end: `${date}T${timeStr}:00`,
-      allDay: false,
-      due: t.due || date,
-    });
-    showToast("已设置时间，同步显示在日历");
-    await load();
+    try {
+      const start = `${date}T${timeStr}:00`;
+      const end = toLocalIso(addHours(parseLocalDateTime(start)!, 1));
+      await updateItem(t.id, {
+        start,
+        end,
+        allDay: false,
+        due: t.due || date,
+      });
+      showToast("已设置时间，同步显示在日历");
+      await load();
+    } catch (e) {
+      showToast("排期失败：" + (e as Error).message);
+    }
   };
 
   const remove = async (t: WorkbenchItem) => {
@@ -218,6 +354,26 @@ export default function TasksPage() {
       await load();
     } catch (e) {
       showToast("删除失败：" + (e as Error).message);
+    }
+  };
+
+  /** 清单重命名（改成空 = 并回收件箱） */
+  const submitRename = async () => {
+    if (renameFrom === null) return;
+    const from = renameFrom;
+    const to = renameTo.trim();
+    if (to === from) {
+      setRenameFrom(null);
+      return;
+    }
+    try {
+      const changed = await renameList(from, to);
+      showToast(`已重命名，影响 ${changed} 条`);
+      if (activeList === from) setActiveList(to);
+      setRenameFrom(null);
+      await load();
+    } catch (e) {
+      showToast("重命名失败：" + (e as Error).message);
     }
   };
 
@@ -258,14 +414,27 @@ export default function TasksPage() {
     }
   };
 
+  /** 搜索过滤（标题 / 项目 / 清单 / 标签） */
+  const searchedItems = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((i) => {
+      const hay = [i.title, i.project, i.list, ...(i.tags || [])]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [items, query]);
+
   /**
    * 当前清单下的条目。
    * undefined = 全部；"" = 收件箱（list 为空）；其他 = 该清单。
    */
   const visibleItems = useMemo(() => {
-    if (activeList === undefined) return items;
-    return items.filter((i) => (i.list || "") === activeList);
-  }, [items, activeList]);
+    if (activeList === undefined) return searchedItems;
+    return searchedItems.filter((i) => (i.list || "") === activeList);
+  }, [searchedItems, activeList]);
 
   /** 顶层条目（不含子任务）—— 主列表只渲染这些 */
   const topItems = useMemo(
@@ -307,11 +476,31 @@ export default function TasksPage() {
           </p>
         </div>
         <button
-          onClick={() => setShowForm((v) => !v)}
+          onClick={openCreate}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand text-white hover:opacity-90 transition-opacity"
         >
           <Plus className="w-4 h-4" /> 添加任务
         </button>
+      </div>
+
+      {/* 搜索 */}
+      <div className="relative">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索任务（标题 / 项目 / 标签）…"
+          className="w-full pl-9 pr-9 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+        {query && (
+          <button
+            onClick={() => setQuery("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            title="清空搜索"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       {/* 清单切换 */}
@@ -326,7 +515,9 @@ export default function TasksPage() {
           }`}
         >
           全部
-          <span className="text-xs opacity-70">{items.filter((i) => !i.done).length}</span>
+          <span className="text-xs opacity-70">
+            {items.filter((i) => !i.parent && !i.done).length}
+          </span>
         </button>
 
         {lists.map((l) => {
@@ -358,6 +549,19 @@ export default function TasksPage() {
             </button>
           );
         })}
+
+        {typeof activeList === "string" && activeList !== "" && (
+          <button
+            onClick={() => {
+              setRenameFrom(activeList);
+              setRenameTo(activeList);
+            }}
+            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-neutral-800"
+            title="重命名当前清单"
+          >
+            <Pencil className="w-3 h-3" /> 重命名清单
+          </button>
+        )}
       </div>
 
       {/* 逾期告警 */}
@@ -375,9 +579,19 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* 添加表单 */}
+      {/* 添加 / 编辑表单 */}
       {showForm && (
         <div className="p-4 rounded-lg bg-white dark:bg-neutral-900 border border-gray-200 dark:border-gray-700 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+              {editing ? `编辑任务：${editing.title}` : "新建任务"}
+            </h3>
+            {editing && (
+              <span className="text-xs text-gray-400">
+                修改会立刻写回 workspace.md
+              </span>
+            )}
+          </div>
           <input
             autoFocus
             value={title}
@@ -400,13 +614,23 @@ export default function TasksPage() {
             <input
               type="date"
               value={due}
-              onChange={(e) => setDue(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDue(v);
+                if (!v) setRemind("");
+                else
+                  syncRemind({ due: v, time, allDay, preset: remindPreset });
+              }}
               className="px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white"
             />
             <input
               type="time"
               value={time}
-              onChange={(e) => setTime(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setTime(v);
+                syncRemind({ due, time: v, allDay, preset: remindPreset });
+              }}
               disabled={allDay}
               className="px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white disabled:opacity-50"
             />
@@ -456,12 +680,70 @@ export default function TasksPage() {
               <input
                 type="checkbox"
                 checked={allDay}
-                onChange={(e) => setAllDay(e.target.checked)}
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  setAllDay(v);
+                  syncRemind({ due, time, allDay: v, preset: remindPreset });
+                }}
                 className="h-3.5 w-3.5 rounded border-gray-300 text-brand focus:ring-brand"
               />
               全天（不填具体时间）
             </label>
           </div>
+
+          {/* 提醒 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <select
+              value={remindPreset}
+              onChange={(e) => {
+                const v = e.target.value;
+                setRemindPreset(v);
+                if (v === "none") {
+                  setRemind("");
+                  return;
+                }
+                if (v === "custom") {
+                  if (!remind && due) {
+                    const base = reminderBase({
+                      start: allDay ? `${due}T00:00:00` : `${due}T${time}:00`,
+                      allDay,
+                    });
+                    setRemind(base ? computeRemindAt(base, 30) : "");
+                  }
+                  return;
+                }
+                syncRemind({ due, time, allDay, preset: v });
+              }}
+              disabled={!due}
+              className="px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white disabled:opacity-50"
+              title={due ? "到点提醒" : "先设置日期，才能加提醒"}
+            >
+              {REMIND_PRESETS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+              <option value="custom">自定义时间…</option>
+            </select>
+            {remindPreset === "custom" && (
+              <input
+                type="datetime-local"
+                value={remind.slice(0, 16)}
+                disabled={!due}
+                onChange={(e) =>
+                  setRemind(e.target.value ? `${e.target.value}:00` : "")
+                }
+                className="px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white disabled:opacity-50"
+              />
+            )}
+          </div>
+          {remind ? (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              将于 {describeRemind(remind)} 提醒（应用内；配了推送渠道也会发到手机）
+            </p>
+          ) : !due ? (
+            <p className="text-xs text-gray-400">设置日期后才能加提醒</p>
+          ) : null}
 
           <p className="text-xs text-gray-500 dark:text-gray-400">
             {due
@@ -471,7 +753,7 @@ export default function TasksPage() {
 
           <div className="flex justify-end gap-2">
             <button
-              onClick={() => setShowForm(false)}
+              onClick={closeForm}
               className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-neutral-800"
             >
               取消
@@ -481,7 +763,8 @@ export default function TasksPage() {
               disabled={saving || !title.trim()}
               className="px-4 py-2 rounded-lg bg-brand text-white hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
             >
-              {saving && <Loader2 className="w-4 h-4 animate-spin" />} 保存
+              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+              {editing ? "保存修改" : "保存"}
             </button>
           </div>
         </div>
@@ -524,7 +807,11 @@ export default function TasksPage() {
                     {PRIORITY_META[t.priority || "mid"].label}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-900 dark:text-white truncate flex items-center gap-2">
+                    <button
+                      onClick={() => openEdit(t)}
+                      className="text-sm font-medium text-gray-900 dark:text-white truncate flex items-center gap-2 hover:text-brand text-left w-full"
+                      title="点击编辑任务"
+                    >
                       {t.title}
                       {t.start && (
                         <span
@@ -544,7 +831,7 @@ export default function TasksPage() {
                           重复
                         </span>
                       )}
-                    </div>
+                    </button>
                     <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex flex-wrap gap-x-3">
                       {t.start && (
                         <span
@@ -556,6 +843,15 @@ export default function TasksPage() {
                         </span>
                       )}
                       {t.due && !t.start && <span>截止 {t.due}</span>}
+                      {t.remind && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400"
+                          title={`提醒 ${describeRemind(t.remind)}`}
+                        >
+                          <Bell className="w-3 h-3" />
+                          {describeRemind(t.remind).slice(5)}
+                        </span>
+                      )}
                       {t.project && <span>项目 {t.project}</span>}
                       {/* 在「全部」视图下才显示清单名，避免当前清单里重复 */}
                       {activeList === undefined && t.list && (
@@ -590,8 +886,7 @@ export default function TasksPage() {
                   {!t.start && (
                     <button
                       onClick={() => {
-                        const d =
-                          t.due || new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+                        const d = t.due || localDate(addDays(new Date(), 1));
                         setTaskTime(t, d, "09:00");
                       }}
                       className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-gray-400 hover:text-brand hover:bg-white dark:hover:bg-neutral-900 transition-all"
@@ -600,6 +895,13 @@ export default function TasksPage() {
                       <CalendarPlus className="w-4 h-4" />
                     </button>
                   )}
+                  <button
+                    onClick={() => openEdit(t)}
+                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-gray-400 hover:text-brand hover:bg-white dark:hover:bg-neutral-900 transition-all"
+                    title="编辑"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={() => setPendingDelete(t)}
                     className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-white dark:hover:bg-neutral-900 transition-all"
@@ -708,7 +1010,7 @@ export default function TasksPage() {
             {done.map((t) => (
               <div
                 key={t.id}
-                className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-neutral-800 opacity-70"
+                className="group flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-neutral-800 opacity-70"
               >
                 <button
                   onClick={() => toggle(t)}
@@ -766,6 +1068,9 @@ export default function TasksPage() {
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
             该条目只存一份，删除后日历上也不会再显示。
+            {pendingDelete.subtaskTotal
+              ? ` 它下面还有 ${pendingDelete.subtaskTotal} 个子任务，会一并删除。`
+              : ""}
           </p>
           <div className="flex justify-end gap-2">
             <button
@@ -787,6 +1092,46 @@ export default function TasksPage() {
           </div>
         </Modal>
       )}
+
+      {/* 清单重命名 —— 清单不是独立实体，改的是条目上的字段 */}
+      <Modal
+        isOpen={renameFrom !== null}
+        onClose={() => setRenameFrom(null)}
+        title="重命名清单"
+        size="sm"
+      >
+        <label className="block text-sm text-gray-600 dark:text-gray-300 mb-2">
+          把「{renameFrom}」改成：
+        </label>
+        <input
+          autoFocus
+          value={renameTo}
+          onChange={(e) => setRenameTo(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submitRename();
+            if (e.key === "Escape") setRenameFrom(null);
+          }}
+          placeholder="新清单名（留空 = 并回收件箱）"
+          className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+        />
+        <p className="mt-2 text-xs text-gray-400">
+          清单不是独立实体，它只是条目上的一个字段值；重命名会批量改这些条目。
+        </p>
+        <div className="flex justify-end gap-2 mt-4">
+          <button
+            onClick={() => setRenameFrom(null)}
+            className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-neutral-800 rounded-lg hover:bg-gray-200 dark:hover:bg-neutral-700"
+          >
+            取消
+          </button>
+          <button
+            onClick={submitRename}
+            className="px-4 py-2 text-sm text-white bg-brand rounded-lg hover:opacity-90"
+          >
+            保存
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

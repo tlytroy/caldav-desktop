@@ -2,18 +2,15 @@
  * 自然语言快速创建 API 客户端
  *
  * 数据流：输入文本 → POST /api/nlp/parse → 展示草稿预览 → 用户确认
- *        → POST /api/md-bridge/events/add（落盘到 events.md）
+ *        → POST /api/workspace/items（落盘到 workspace.md）
  *
  * 注意：解析端点**不写文件**，必须由用户确认后才创建，
  * 避免误识别直接污染唯一事实源。
  */
 
-import axios from "axios";
+import { createApiClient } from "./client";
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  timeout: 40000, // AI 通道可能较慢
-});
+const api = createApiClient(40000);
 
 /** 解析结果来源 */
 export type ParseSource = "local" | "ai";

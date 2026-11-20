@@ -31,6 +31,7 @@ const WRITABLE_SECTIONS = [
   "ai",
   "caldav",
   "webdav",
+  "notifications",
   "nlp",
   "paths",
 ] as const;

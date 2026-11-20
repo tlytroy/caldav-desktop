@@ -7,6 +7,10 @@ import {
   deleteItem,
   type WorkbenchItem,
 } from "../api/workspace";
+import {
+  runCalDAVSync,
+  type CalDAVSyncResult,
+} from "../api/caldav-sync";
 
 /**
  * useCalendarEvents —— 日历视图（workspace.md 的一部分）
@@ -110,46 +114,51 @@ export function useCalendarEvents(_calendarUrl?: string | null, refreshKey?: num
     setEvents((prev) => prev.filter((e) => (e.instanceId || e.id) !== originalId));
   }, []);
 
-  /** 推送数据源到 CalDAV（如果配置了）。失败不影响本地数据 */
-  const pushToCaldav = useCallback(async () => {
-    try {
-      const { syncMdToCaldav } = await import("../api/md-bridge");
-      const r = await syncMdToCaldav({ direction: "push" });
+  /**
+   * 推送 workspace.md → CalDAV。
+   *
+   * 走 `/api/caldav/sync`（统一数据源），**不是**遗留的 md-bridge（events.md）。
+   * 失败直接向上抛 —— 静默失败会让用户以为已经同步成功。
+   */
+  const pushToCaldav = useCallback(
+    async (force = false, uids?: string[]): Promise<CalDAVSyncResult> => {
+      const r = await runCalDAVSync({ direction: "push", force, uids });
       setLastSyncTime(Date.now());
       return r;
-    } catch (err) {
-      console.warn("[useCalendarEvents] push to CalDAV failed:", err);
-      return null;
-    }
-  }, []);
+    },
+    [],
+  );
 
-  /** 拉取远程 CalDAV → 数据源（保留本地优先：仅追加不覆盖） */
-  const pullFromCaldav = useCallback(async () => {
-    try {
-      const { syncMdToCaldav } = await import("../api/md-bridge");
-      const r = await syncMdToCaldav({ direction: "pull" });
+  /** 拉取 CalDAV → workspace.md，并重读界面数据（force = 冲突时以远端为准） */
+  const pullFromCaldav = useCallback(
+    async (force = false, uids?: string[]): Promise<CalDAVSyncResult> => {
+      const r = await runCalDAVSync({ direction: "pull", force, uids });
       setLastSyncTime(Date.now());
       await loadEvents();
       return r;
-    } catch (err) {
-      console.warn("[useCalendarEvents] pull from CalDAV failed:", err);
-      return null;
-    }
-  }, [loadEvents]);
+    },
+    [loadEvents],
+  );
 
-  /** 全量双向同步 */
-  const bidirectionalSync = useCallback(async () => {
-    try {
-      const { syncMdToCaldav } = await import("../api/md-bridge");
-      const r = await syncMdToCaldav({ direction: "bidirectional" });
+  /** 双向同步：先拉后推（顺序由服务端保证），完成后重读 */
+  const bidirectionalSync = useCallback(
+    async (
+      force = false,
+      uids?: string[],
+      merge = false,
+    ): Promise<CalDAVSyncResult> => {
+      const r = await runCalDAVSync({
+        direction: "bidirectional",
+        force,
+        merge,
+        uids,
+      });
       setLastSyncTime(Date.now());
       await loadEvents();
       return r;
-    } catch (err) {
-      console.warn("[useCalendarEvents] bidirectional sync failed:", err);
-      return null;
-    }
-  }, [loadEvents]);
+    },
+    [loadEvents],
+  );
 
   return {
     events,

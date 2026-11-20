@@ -1,10 +1,11 @@
 {
   "name": "caldav-renderer",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "build-android": "tsc && vite build && npx cap copy android && npx cap open android",
     "sync-android": "npx cap copy android",

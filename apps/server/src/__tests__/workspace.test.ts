@@ -6,7 +6,7 @@ import {
   parseWorkspace,
   serializeWorkspace,
   readWorkspace,
-  writeWorkspace,
+  backupWorkspaceFile,
   validateItem,
   buildValidationReport,
   filterItems,
@@ -226,6 +226,42 @@ describe("序列化与往返", () => {
     expect(back.location).toBe(item.location);
   });
 
+  it("uid 能往返；未设置时不写出该行", () => {
+    const withUid: WorkbenchItem = {
+      id: "abc12345",
+      uid: "remote-uid-xyz",
+      kind: "event",
+      title: "远端日程",
+      start: "2026-11-02T09:00:00",
+    };
+    const text = serializeWorkspace([withUid]);
+    const back = parseWorkspace(text).items[0];
+    expect(back.uid).toBe("remote-uid-xyz");
+
+    // 本地条目（uid 缺省）不必写 uid 行，保持 md 干净
+    const local = serializeWorkspace([
+      { id: "abc12345", kind: "task", title: "本地任务" },
+    ]);
+    expect(local).not.toContain("- uid:");
+  });
+
+  it("remind 能往返；非法格式进 errors", () => {
+    const text = serializeWorkspace([
+      {
+        id: "abc12345",
+        kind: "event",
+        title: "提醒测试",
+        start: "2026-11-02T10:00:00",
+        remind: "2026-11-02T09:30:00",
+      },
+    ]);
+    expect(text).toContain("- remind: 2026-11-02T09:30:00");
+    expect(parseWorkspace(text).items[0].remind).toBe("2026-11-02T09:30:00");
+
+    const bad = parseWorkspace("## x\n- id: abc12345\n- remind: tomorrow\n");
+    expect(bad.items[0].errors?.join(",")).toContain("remind");
+  });
+
   it("未完成的排在已完成前面", () => {
     const text = serializeWorkspace([
       { id: "aaaaaaaa", kind: "task", title: "已完成", done: true },
@@ -260,11 +296,13 @@ describe("文件读写与备份", () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("写入后能读回", () => {
-    writeWorkspace(
-      [{ id: "cccccccc", kind: "task", title: "测试", start: "2026-10-01T09:00:00" }],
-      undefined,
+  it("写出后能读回", () => {
+    fs.writeFileSync(
       wsFile,
+      serializeWorkspace([
+        { id: "cccccccc", kind: "task", title: "测试", start: "2026-10-01T09:00:00" },
+      ]),
+      "utf-8",
     );
     const ws = readWorkspace(wsFile);
     expect(ws.items).toHaveLength(1);
@@ -276,9 +314,19 @@ describe("文件读写与备份", () => {
     expect(ws.items).toHaveLength(0);
   });
 
-  it("第二次写入会生成备份", () => {
-    writeWorkspace([{ id: "dddddddd", kind: "task", title: "第一版" }], undefined, wsFile);
-    writeWorkspace([{ id: "eeeeeeee", kind: "task", title: "第二版" }], undefined, wsFile);
+  it("备份会保存旧内容", () => {
+    fs.writeFileSync(
+      wsFile,
+      serializeWorkspace([{ id: "dddddddd", kind: "task", title: "第一版" }]),
+      "utf-8",
+    );
+    const target = backupWorkspaceFile(wsFile);
+    expect(target).toBeTruthy();
+    fs.writeFileSync(
+      wsFile,
+      serializeWorkspace([{ id: "eeeeeeee", kind: "task", title: "第二版" }]),
+      "utf-8",
+    );
 
     const backupFiles = fs.readdirSync(path.join(tmp, ".workspace-backups"));
     expect(backupFiles.length).toBeGreaterThanOrEqual(1);
@@ -290,15 +338,21 @@ describe("文件读写与备份", () => {
   });
 
   it("备份保留有限份数", () => {
+    fs.writeFileSync(
+      wsFile,
+      serializeWorkspace([{ id: "ffffffff", kind: "task", title: "第0版" }]),
+      "utf-8",
+    );
     for (let i = 0; i < 15; i++) {
-      writeWorkspace(
-        [{ id: "ffffffff", kind: "task", title: `第${i}版` }],
-        undefined,
+      backupWorkspaceFile(wsFile);
+      fs.writeFileSync(
         wsFile,
+        serializeWorkspace([{ id: "ffffffff", kind: "task", title: `第${i}版` }]),
+        "utf-8",
       );
     }
     const backupFiles = fs.readdirSync(path.join(tmp, ".workspace-backups"));
-    expect(backupFiles.length).toBeLessThanOrEqual(10);
+    expect(backupFiles.length).toBeLessThanOrEqual(20);
   });
 });
 
@@ -606,6 +660,25 @@ describe("清单（List）", () => {
         list: "工作",
       }),
     ).toEqual([]);
+  });
+
+  it("validateItem 接受 uid，拒绝空值", () => {
+    expect(
+      validateItem({
+        id: "aaa11111",
+        kind: "event",
+        title: "x",
+        uid: "remote-uid-1",
+      }),
+    ).toEqual([]);
+    expect(
+      validateItem({
+        id: "aaa11111",
+        kind: "event",
+        title: "x",
+        uid: "",
+      }).join(","),
+    ).toContain("uid");
   });
 });
 

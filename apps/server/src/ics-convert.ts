@@ -43,6 +43,10 @@ export interface IcsEvent {
   /** 完整 RRULE 字符串 */
   recurrence?: string;
   status?: string;
+  /** 远端最后修改时间（ISO，UTC）；来自 LAST-MODIFIED 或 DTSTAMP */
+  lastModified?: string;
+  /** 重复事件的例外实例（RECURRENCE-ID），同步时应跳过 */
+  recurrenceId?: string;
   /** 原始 VEVENT 块（导入时保留未知字段） */
   rawBlock?: string;
 }
@@ -60,6 +64,29 @@ function fmtDateTime(s: string): string {
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
   if (!m) return s.replace(/[-:]/g, "");
   return `${m[1]}${m[2]}${m[3]}T${m[4]}${m[5]}${m[6] || "00"}`;
+}
+
+/**
+ * ISO 时间 → UTC 的 "YYYYMMDDTHHMMSSZ"。
+ *
+ * DTSTAMP / CREATED / LAST-MODIFIED 按 RFC 5545 必须是 UTC（带 Z）。
+ * 以前这里输出的是**本地时间不带 Z** —— 别的客户端会把它当浮动时间，
+ * 跨时区时「最后修改时间」会偏好几个小时，冲突判定跟着错。
+ */
+function fmtUtc(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return `${fmtDateTime(iso)}Z`;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}T${p(
+    d.getUTCHours(),
+  )}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}Z`;
+}
+
+/** ICS 的 UTC 时间（20261026T020000Z）→ ISO 字符串 */
+export function parseIcsUtcToIso(s: string): string | undefined {
+  const m = s.trim().match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+  if (!m) return undefined;
+  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}.000Z`;
 }
 
 /** 解析 "YYYYMMDD" 或 "YYYYMMDDTHHMMSS" → 本地时间串 */
@@ -174,10 +201,16 @@ function foldLine(line: string): string {
  */
 export function itemToIcsBlock(item: WorkbenchItem): string {
   const lines: string[] = [];
-  const uid = item.id;
+  // UID 优先用外部日历给的（拉取时已落盘保存），否则用本地 id。
+  // 用错 UID 服务器会当成另一个事件 —— 手机上就会看到重复日程。
+  const uid = item.uid || item.id;
 
   lines.push(`UID:${uid}`);
-  lines.push(`DTSTAMP:${fmtDateTime(new Date().toISOString().slice(0, 19))}`);
+  lines.push(
+    `DTSTAMP:${fmtUtc(
+      item.updatedAt || item.createdAt || new Date().toISOString(),
+    )}`,
+  );
 
   const allDay = !!item.allDay;
   if (allDay) {
@@ -217,8 +250,12 @@ export function itemToIcsBlock(item: WorkbenchItem): string {
   if (item.location) {
     lines.push(`LOCATION:${escapeText(item.location)}`);
   }
+  // 项目是**本工具的字段**，不是 RFC 5545 的 CATEGORIES 语义。
+  // 若写成 CATEGORIES，拉取时会被当成标签，和真正的 tags 混在一起
+  // （项目 → 标签 → 字段指纹变化 → 每次同步都多一次无意义的往返）。
+  // 用 X- 私有属性保存：别的日历会忽略，我们自己能无损读回。
   if (item.project) {
-    lines.push(`CATEGORIES:${escapeText(item.project)}`);
+    lines.push(`X-WORKBENCH-PROJECT:${escapeText(item.project)}`);
   }
   // 标签：**每个标签一行 CATEGORIES**（RFC 5545 允许属性重复出现）。
   //
@@ -265,10 +302,10 @@ export function itemToIcsBlock(item: WorkbenchItem): string {
   }
 
   if (item.createdAt) {
-    lines.push(`CREATED:${fmtDateTime(item.createdAt.slice(0, 19))}`);
+    lines.push(`CREATED:${fmtUtc(item.createdAt)}`);
   }
   if (item.updatedAt) {
-    lines.push(`LAST-MODIFIED:${fmtDateTime(item.updatedAt.slice(0, 19))}`);
+    lines.push(`LAST-MODIFIED:${fmtUtc(item.updatedAt)}`);
   }
 
   return lines.map(foldLine).join("\r\n");
@@ -310,7 +347,7 @@ export function itemsToIcsMap(items: WorkbenchItem[]): Map<string, string> {
       "END:VEVENT",
       "END:VCALENDAR",
     ].join("\r\n");
-    map.set(`${item.id}.ics`, body);
+    map.set(`${item.uid || item.id}.ics`, body);
   }
   return map;
 }
@@ -404,6 +441,15 @@ function parseVeventBlock(block: string): IcsEvent | null {
     ? categoriesAll.flatMap((c) => splitEscaped(c, ","))
     : undefined;
 
+  // 远端修改时间：LAST-MODIFIED 优先，退回 DTSTAMP。
+  // 冲突判定会用到它（与本地字段指纹配合，判断「两边都改过」）。
+  const lastModified =
+    parseIcsUtcToIso(get("LAST-MODIFIED") || "") ||
+    parseIcsUtcToIso(get("DTSTAMP") || "");
+  // 重复事件的例外实例（RECURRENCE-ID）不是独立事件。
+  // 当成新事件会把同 UID 的主事件覆盖掉（只剩那一天），同步时必须跳过。
+  const recurrenceId = get("RECURRENCE-ID");
+
   return {
     uid: get("UID") || `ics-${Math.random().toString(16).slice(2, 10)}`,
     title: unescapeText(summary),
@@ -412,11 +458,15 @@ function parseVeventBlock(block: string): IcsEvent | null {
     allDay: isAllDay,
     description: get("DESCRIPTION") ? unescapeText(get("DESCRIPTION")!) : undefined,
     location: get("LOCATION") ? unescapeText(get("LOCATION")!) : undefined,
-    project: undefined,
+    project: get("X-WORKBENCH-PROJECT")
+      ? unescapeText(get("X-WORKBENCH-PROJECT")!)
+      : undefined,
     tags,
     priority,
     recurrence,
     status: get("STATUS")?.toLowerCase(),
+    lastModified,
+    recurrenceId,
     rawBlock: block,
   };
 }
@@ -441,6 +491,40 @@ function normalizeRRuleForStorage(rule: RecurrenceRule): string {
 }
 
 /**
+ * UID → 本地 id（8 位小写十六进制）。
+ *
+ * - `abc12345` 这种本来就是 8 位 hex 的（本项目自己导出的）直接复用，
+ *   保证「导出 → 再导入」不产生新 id。
+ * - 其它 UID（Radicale 的 UUID、Outlook 的长 UID）用 FNV-1a 哈希成 8 位。
+ *   必须**确定性**：同一份远端数据每次拉取都得到同一个 id，
+ *   否则每同步一次就会多出一条重复。
+ */
+export function idFromUid(uid: string): string {
+  const trimmed = (uid || "").trim();
+  if (/^[0-9a-f]{8}$/.test(trimmed)) return trimmed;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < trimmed.length; i++) {
+    h ^= trimmed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/**
+ * 旧版 id 推导规则（去掉非十六进制字符、截 8 位、不足补 0）。
+ *
+ * **只用于迁移**：升级前从 ICS 导入的条目没有 `uid`，id 是用这条规则算的。
+ * CalDAV 拉取时用它把老条目认领到远端 UID 上，避免第一次同步产生重复；
+ * 新代码不要再用它生成 id。
+ */
+export function legacyIdFromUid(uid: string): string {
+  return (uid || "")
+    .replace(/[^0-9a-f]/gi, "")
+    .slice(0, 8)
+    .padEnd(8, "0");
+}
+
+/**
  * ICS 事件 → 工作台条目（用于导入）
  */
 export function icsEventToItem(
@@ -448,7 +532,8 @@ export function icsEventToItem(
   opts: { kind?: "task" | "event" } = {},
 ): WorkbenchItem {
   return {
-    id: ev.uid.replace(/[^0-9a-f]/gi, "").slice(0, 8).padEnd(8, "0"),
+    id: idFromUid(ev.uid),
+    uid: ev.uid || undefined,
     kind: opts.kind ?? "event",
     title: ev.title,
     start: ev.start,
@@ -461,6 +546,7 @@ export function icsEventToItem(
     priority: ev.priority,
     recurrence: ev.recurrence,
     status: (ev.status as WorkbenchItem["status"]) ?? "confirmed",
+    updatedAt: ev.lastModified,
   };
 }
 
@@ -469,7 +555,7 @@ export function icsEventToItem(
  */
 export function itemToIcsEvent(item: WorkbenchItem): IcsEvent {
   return {
-    uid: item.id,
+    uid: item.uid || item.id,
     title: item.title,
     start: item.start || "",
     end: item.end,

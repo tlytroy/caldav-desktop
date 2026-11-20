@@ -1,19 +1,22 @@
 {
   "name": "caldav-desktop-app",
-  "version": "0.1.0",
+  "version": "0.3.1",
+  "description": "CalDAV Desktop —— 以 workspace.md 为唯一事实源的本地优先日历与任务应用",
+  "author": "atdoc",
   "main": "dist/main.js",
   "scripts": {
     "dev": "concurrently \"pnpm run dev:main\" \"pnpm run dev:renderer\"",
     "dev:main": "tsx watch main.ts",
     "dev:renderer": "cd ../renderer && pnpm dev",
-    "build": "pnpm run build:main && pnpm run build:renderer && pnpm run build:copy-renderer",
+    "build": "pnpm run build:main && pnpm run build:renderer && pnpm run build:copy-renderer && pnpm run build:server",
     "build:main": "tsc",
     "build:renderer": "cd ../renderer && pnpm build",
     "build:copy-renderer": "node -e \"const fs=require('fs');const s='../renderer/dist',d='dist/renderer';fs.rmSync(d,{recursive:true,force:true});fs.cpSync(s,d,{recursive:true})\"",
     "package": "electron-builder --config electron-builder.config.json",
     "package:win": "electron-builder --config electron-builder.config.json --win",
     "package:mac": "electron-builder --config electron-builder.config.json --mac",
-    "package:linux": "electron-builder --config electron-builder.config.json --linux"
+    "package:linux": "electron-builder --config electron-builder.config.json --linux",
+    "build:server": "node build-bundle.mjs"
   },
   "dependencies": {
     "electron-squirrel-startup": "^1.0.0",
@@ -25,6 +28,7 @@
     "typescript": "^5.3.3",
     "tsx": "^4.7.0",
     "concurrently": "^8.2.2",
-    "electron-builder": "^24.9.1"
+    "electron-builder": "^24.9.1",
+    "esbuild": "^0.25.0"
   }
 }

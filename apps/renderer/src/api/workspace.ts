@@ -1,9 +1,6 @@
-import axios from "axios";
+import { createApiClient } from "./client";
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  timeout: 30000,
-});
+const api = createApiClient(30000);
 
 /**
  * 统一数据源客户端（workspace.md）
@@ -18,11 +15,15 @@ export type ItemPriority = "high" | "mid" | "low";
 
 export interface WorkbenchItem {
   id: string;
+  /** 外部日历（CalDAV / ICS）的稳定 UID；为空时用 id */
+  uid?: string;
   kind: ItemKind;
   title: string;
   start?: string;
   end?: string;
   due?: string;
+  /** 提醒时间（本地时间串）；空 = 不提醒 */
+  remind?: string;
   allDay?: boolean;
   done?: boolean;
   priority?: ItemPriority;
@@ -41,6 +42,9 @@ export interface WorkbenchItem {
   /** 展开后的实例标记（instanceId 指向原始条目） */
   instanceId?: string;
   instanceDate?: string;
+  /** 重复事件的系列原始起点/终点（编辑时用，避免把锚点改成某一次实例） */
+  seriesStart?: string;
+  seriesEnd?: string;
   /** 解析错误（服务端会带上，便于界面提示） */
   errors?: string[];
   // ---- 子任务统计（服务端计算，只读）----
@@ -233,18 +237,32 @@ export async function exportIcs(opts: {
   return data;
 }
 
-/** 导出下载链接（用于 <a download> 或 window.open） */
-export function exportIcsDownloadUrl(opts: {
+/**
+ * 下载 .ics：必须走带 Authorization 的请求再转 Blob。
+ * `window.open` 带不上 Bearer 头，开启认证后会直接 401。
+ */
+export async function downloadIcs(opts: {
   start?: string;
   end?: string;
   scope?: "all" | "calendar" | "board";
-} = {}): string {
-  const base = import.meta.env.VITE_API_URL || "";
-  const params = new URLSearchParams({ download: "1" });
-  if (opts.start) params.set("start", opts.start);
-  if (opts.end) params.set("end", opts.end);
-  if (opts.scope) params.set("scope", opts.scope);
-  return `${base}/api/workspace/ics/export?${params.toString()}`;
+} = {}): Promise<void> {
+  const params: Record<string, string> = { download: "1" };
+  if (opts.start) params.start = opts.start;
+  if (opts.end) params.end = opts.end;
+  if (opts.scope) params.scope = opts.scope;
+
+  const res = await api.get("/api/workspace/ics/export", {
+    params,
+    responseType: "blob",
+  });
+  const url = URL.createObjectURL(res.data as Blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `workspace-${new Date().toISOString().slice(0, 10)}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ===== 清单 =====

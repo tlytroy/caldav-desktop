@@ -12,7 +12,10 @@ import {
 /** 固定基准时间：2026-10-15（周四）20:30 */
 const NOW = new Date(2026, 9, 15, 20, 30, 0);
 
-const p = (s: string) => parseNaturalLanguage(s, NOW);
+// 绝大多数用例都在断言「解析成功」的字段：用非空版本，失败时让断言直接炸出
+// 真实的 null，而不是每个调用点手写 `!`。需要断言 null 的用例用 pOrNull。
+const pOrNull = (s: string) => parseNaturalLanguage(s, NOW);
+const p = (s: string) => parseNaturalLanguage(s, NOW)!;
 
 describe("中文数字转换", () => {
   it("阿拉伯数字直通", () => {
@@ -229,7 +232,7 @@ describe("置信度与匹配字段", () => {
     expect(d!.matchedFields).toContain("明天");
   });
   it("无法识别时间返回 null", () => {
-    expect(p("随便写点什么")).toBeNull();
+    expect(pOrNull("随便写点什么")).toBeNull();
   });
   it("isUsableDraft 判定", () => {
     expect(isUsableDraft(p("明天下午3点开会"))).toBe(true);
@@ -263,5 +266,32 @@ describe("不崩溃", () => {
   it("非法日期被忽略", () => {
     const d = p("2026-13-45 开会");
     if (d?.start) expect(d.start).not.toContain("NaN");
+  });
+});
+
+describe("口语写法回归（P4 修复）", () => {
+  it("明早 = 明天早上，且标题不残留「明早」", () => {
+    const d = p("明早9点站会");
+    expect(d?.start).toBe("2026-10-16T09:00:00"); // NOW = 2026-10-15 20:30
+    expect(d?.title).toBe("站会");
+  });
+
+  it("明晚 = 明天晚上", () => {
+    const d = p("明晚8点看电影");
+    expect(d?.start).toBe("2026-10-16T20:00:00");
+    expect(d?.title).toBe("看电影");
+  });
+
+  it("明年 只在今年时补一年，不重复加", () => {
+    const d = p("明年1月1日");
+    expect(d?.start?.slice(0, 4)).toBe("2027");
+    expect(d?.title).not.toContain("明年");
+  });
+
+  it("每周一三五：重复规则保留，标题不残留周几", () => {
+    const d = p("每周一三五晚上8点健身");
+    expect(d?.recurrence).toBe("weekly");
+    expect(d?.title).toBe("健身");
+    expect(d?.start?.endsWith("T20:00:00")).toBe(true);
   });
 });

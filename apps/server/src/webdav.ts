@@ -232,7 +232,21 @@ export async function putRemoteFile(
   if (!res.ok && res.status !== 204) {
     throw new Error(describeError(res.status, res.statusText));
   }
-  return { etag: normalizeEtag(res.headers.get("etag")) };
+  const putEtag = normalizeEtag(res.headers.get("etag"));
+
+  // 部分 WebDAV 网关（OneDrive / SharePoint 等）在 PUT 响应头里返回的 ETag
+  // 与随后 HEAD/GET 返回的 ETag 属于不同命名空间（前者是短哈希，后者是
+  // `{GUID},N` 形式）。若把 PUT 的 ETag 当作同步基线，下一次 push 用
+  // statRemoteFile 读到的 ETag 与基线永不相等，会被误判成「远端已被其他
+  // 设备修改」，用户每次推送都得手动 force。
+  // 因此回读一次远端状态，保证「记录的基线」与「比较用的值」同源。
+  try {
+    const info = await statRemoteFile(cfg, filename);
+    if (info.exists && info.etag) return { etag: info.etag };
+  } catch {
+    // 回读失败不应把已成功的上传判为失败，退回 PUT 响应头里的 ETag
+  }
+  return { etag: putEtag };
 }
 
 /** 下载远端文件内容；不存在时返回 null */

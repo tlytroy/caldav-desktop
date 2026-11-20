@@ -1,4 +1,3 @@
-import axios from "axios";
 import type {
   Calendar,
   CalendarEvent,
@@ -7,10 +6,9 @@ import type {
 } from "../types";
 
 // 创建 axios 实例
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  timeout: 30000,
-});
+import { createApiClient } from "./client";
+
+const api = createApiClient(30000);
 
 // 请求拦截器
 api.interceptors.request.use(

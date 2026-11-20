@@ -9,7 +9,8 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import axios from "axios";
+import { getApiBaseUrl, setApiBaseUrl } from "../../api/base";
+import { createApiClient } from "../../api/client";
 import {
   Check,
   Loader2,
@@ -23,8 +24,10 @@ import {
   Info,
 } from "lucide-react";
 import { useI18n, AVAILABLE_LOCALES, type Locale } from "../../i18n";
+import { BackupPanel } from "./BackupPanel";
+import { BackendStatus } from "./BackendStatus";
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL });
+const api = createApiClient(30000);
 
 interface AppConfig {
   language: string;
@@ -45,6 +48,9 @@ interface AppConfig {
     rootUrl: string;
     username: string;
     password: string;
+    /** 具体日历 URL；留空 = 自动发现第一个 */
+    calendarUrl: string;
+    timeoutMs: number;
     syncDirection: "push" | "pull" | "bidirectional";
     autoSyncMinutes: number;
   };
@@ -61,8 +67,7 @@ interface AppConfig {
     parserLocale: string;
   };
   paths: {
-    eventsFile: string;
-    kanbanFile: string;
+    workspaceFile: string;
   };
 }
 
@@ -73,11 +78,18 @@ export default function ConfigSettings() {
   const [tab, setTab] = useState<Tab>("general");
   const [cfg, setCfg] = useState<AppConfig | null>(null);
   const [configPath, setConfigPath] = useState("");
+  /** 前端-only 部署时的后端地址（存在 localStorage，不在 config.json） */
+  const [apiBaseInput, setApiBaseInput] = useState(getApiBaseUrl());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [testBusy, setTestBusy] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
+  // CalDAV 日历列表（点「读取日历列表」才有；用于选择同步目标）
+  const [caldavCals, setCaldavCals] = useState<
+    Array<{ url: string; displayName: string }>
+  >([]);
+  const [caldavMsg, setCaldavMsg] = useState<string | null>(null);
 
   /** 加载配置 */
   const load = useCallback(async () => {
@@ -189,6 +201,68 @@ export default function ConfigSettings() {
     }
   };
 
+  /** 保存后端地址并刷新（axios 的 baseURL 在模块加载时确定） */
+  const saveApiBase = () => {
+    setApiBaseUrl(apiBaseInput);
+    window.location.reload();
+  };
+
+  /** 读取 CalDAV 日历列表（先保存当前配置，再查询；不写任何日历数据） */
+  const loadCaldavCalendars = async () => {
+    if (!cfg) return;
+    setTestBusy("caldav-list");
+    setCaldavMsg(null);
+    try {
+      await api.put("/api/config", { caldav: cfg.caldav });
+      const { data } = await api.get("/api/caldav/calendars");
+      if (data?.degraded) {
+        setCaldavMsg(data.message || "无法连接 CalDAV 服务器");
+        setCaldavCals([]);
+        return;
+      }
+      const list = (data?.calendars || []) as Array<{
+        url: string;
+        displayName: string;
+      }>;
+      setCaldavCals(list);
+      setCaldavMsg(
+        list.length ? `找到 ${list.length} 个日历` : "服务器上没有找到日历",
+      );
+    } catch (e: any) {
+      setCaldavMsg(
+        `读取失败：${e?.response?.data?.message || e?.message}`,
+      );
+    } finally {
+      setTestBusy(null);
+    }
+  };
+
+  /** 测试 CalDAV 连接（只发一次 PROPFIND，不写数据） */
+  const testCaldav = async () => {
+    if (!cfg) return;
+    setTestBusy("caldav");
+    setMsg(null);
+    try {
+      await api.put("/api/config", { caldav: cfg.caldav });
+      const { data } = await api.post("/api/caldav/test", {
+        calendarUrl: cfg.caldav.calendarUrl,
+      });
+      setMsg({
+        type: "ok",
+        text: `${t("settings.ai.testSuccess")}：${data?.message || ""}`,
+      });
+    } catch (e: any) {
+      setMsg({
+        type: "err",
+        text: `${t("settings.ai.testFailed")}：${
+          e?.response?.data?.message || e?.message
+        }`,
+      });
+    } finally {
+      setTestBusy(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-10 text-gray-400 text-sm">
@@ -277,6 +351,30 @@ export default function ConfigSettings() {
             <code className="block px-3 py-2 rounded-lg bg-gray-100 dark:bg-neutral-800 text-xs text-gray-600 dark:text-gray-300 break-all">
               {configPath}
             </code>
+          </Field>
+
+          {/* 前端-only 部署：浏览器 / 另一台设备连远端后端 */}
+          <Field
+            label={t("settings.general.apiBase")}
+            hint={t("settings.general.apiBaseHint")}
+          >
+            <div className="flex gap-2">
+              <input
+                value={apiBaseInput}
+                onChange={(e) => setApiBaseInput(e.target.value)}
+                placeholder="http://nas:3001"
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white text-sm"
+              />
+              <button
+                onClick={saveApiBase}
+                className="whitespace-nowrap rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-700 hover:bg-gray-200 dark:bg-neutral-800 dark:text-gray-300"
+              >
+                {t("settings.general.apiBaseSave")}
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              当前生效：{getApiBaseUrl() || "同源"}
+            </p>
           </Field>
         </div>
       )}
@@ -414,6 +512,53 @@ export default function ConfigSettings() {
               />
             </Field>
 
+            <Field
+              label={t("settings.sync.calendarUrl")}
+              hint={t("settings.sync.calendarUrlHint")}
+            >
+              <div className="flex gap-2">
+                <input
+                  value={cfg.caldav.calendarUrl}
+                  onChange={(e) =>
+                    patch("caldav", "calendarUrl", e.target.value)
+                  }
+                  placeholder="http://host:5232/user/calendar/"
+                  className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white text-sm"
+                />
+                <button
+                  onClick={loadCaldavCalendars}
+                  disabled={testBusy !== null || !cfg.caldav.rootUrl}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
+                >
+                  {testBusy === "caldav-list" ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  )}
+                  {t("settings.sync.loadCalendars")}
+                </button>
+              </div>
+              {caldavCals.length > 0 && (
+                <select
+                  value={cfg.caldav.calendarUrl}
+                  onChange={(e) =>
+                    patch("caldav", "calendarUrl", e.target.value)
+                  }
+                  className="mt-2 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white text-sm"
+                >
+                  <option value="">自动（第一个日历）</option>
+                  {caldavCals.map((c) => (
+                    <option key={c.url} value={c.url}>
+                      {c.displayName || c.url}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {caldavMsg && (
+                <p className="mt-1 text-xs text-gray-400">{caldavMsg}</p>
+              )}
+            </Field>
+
             <div className="grid grid-cols-2 gap-3">
               <Field label={t("settings.sync.username")}>
                 <input
@@ -459,6 +604,19 @@ export default function ConfigSettings() {
                 />
               </Field>
             </div>
+
+            <button
+              onClick={testCaldav}
+              disabled={testBusy !== null || !cfg.caldav.rootUrl}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg bg-gray-100 dark:bg-neutral-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 disabled:opacity-50"
+            >
+              {testBusy === "caldav" ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Check className="w-3.5 h-3.5" />
+              )}
+              {t("settings.sync.testCaldav")}
+            </button>
           </section>
 
           <hr className="border-gray-200 dark:border-gray-700" />
@@ -544,23 +702,18 @@ export default function ConfigSettings() {
             {t("settings.data.description")}
           </p>
 
-          <Field label={t("settings.data.eventsFile")} hint={t("settings.data.pathHint")}>
+          <Field label={t("settings.data.workspaceFile")} hint={t("settings.data.pathHint")}>
             <input
-              value={cfg.paths?.eventsFile || ""}
-              onChange={(e) => patch("paths", "eventsFile", e.target.value)}
-              placeholder="./events.md"
+              value={cfg.paths?.workspaceFile || ""}
+              onChange={(e) => patch("paths", "workspaceFile", e.target.value)}
+              placeholder="./workspace.md"
               className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white text-sm font-mono"
             />
           </Field>
 
-          <Field label={t("settings.data.kanbanFile")} hint={t("settings.data.pathHint")}>
-            <input
-              value={cfg.paths?.kanbanFile || ""}
-              onChange={(e) => patch("paths", "kanbanFile", e.target.value)}
-              placeholder="./工作搭子看板.md"
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-neutral-800 text-gray-900 dark:text-white text-sm font-mono"
-            />
-          </Field>
+          <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+            {t("settings.data.legacyHint")}
+          </p>
 
           <div className="flex items-start gap-2 p-2.5 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300">
             <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -572,6 +725,10 @@ export default function ConfigSettings() {
               {configPath}
             </code>
           </Field>
+
+          <BackendStatus />
+
+          <BackupPanel />
         </div>
       )}
 

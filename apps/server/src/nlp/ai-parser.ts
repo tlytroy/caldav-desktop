@@ -271,7 +271,7 @@ export async function parseEventText(
   const localDraft = parseNaturalLanguage(text);
 
   // 默认：本地解析够好就不打扰 AI
-  if (!opts?.forceAI && isUsableDraft(localDraft)) {
+  if (!opts?.forceAI && localDraft && isUsableDraft(localDraft)) {
     return { ...localDraft, source: "local", localDraft };
   }
 

@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { apiErrorHandler } from "../http-errors.js";
 
 let aiServer: http.Server;
 let apiServer: http.Server;
@@ -153,6 +154,7 @@ beforeAll(async () => {
   const app = express();
   app.use(express.json());
   app.use("/api/nlp", nlpRouter);
+  app.use(apiErrorHandler);
   apiServer = app.listen(0);
   await new Promise<void>((r) => apiServer.once("listening", r));
 });
@@ -177,7 +179,7 @@ async function post(p: string, body?: unknown) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   });
-  return { status: r.status, json: await r.json() };
+  return { status: r.status, json: (await r.json()) as any };
 }
 async function get(p: string) {
   const r = await fetch(`${apiBase()}${p}`);

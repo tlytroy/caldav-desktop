@@ -17,6 +17,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getConfig, resolveDataPath } from "../config.js";
 import {
+  parseWorkspace,
+  serializeWorkspace,
+  type WorkbenchItem,
+} from "../workspace.js";
+import {
   loadWebDAVConfig,
   isWebDAVConfigured,
   statRemoteFile,
@@ -26,8 +31,35 @@ import {
   writeSyncState,
   type WebDAVConfig,
 } from "../webdav.js";
+import { asyncHandler } from "../http.js";
+import { isSyncSuspended } from "../restore.js";
+import {
+  beginSyncActivity,
+  recordSyncConflict,
+  recordSyncEvent,
+} from "../sync-control.js";
 
 export const webdavRouter = express.Router();
+
+/** 恢复之后同步被暂停，必须由用户先选择方向（P7）。 */
+function requireSyncNotSuspended(res: express.Response): boolean {
+  if (isSyncSuspended()) {
+    res.status(409).json({
+      success: false,
+      code: "SYNC_SUSPENDED",
+      error: "同步已暂停：恢复工作区后需要先选择同步方向（拉取 / 推送 / 双向）",
+    });
+    return false;
+  }
+  return true;
+}
+
+/** 把 WebDAV 请求登记为「在途同步」，恢复流程会等它结束。 */
+function markWebDAVActivity(res: express.Response): void {
+  const end = beginSyncActivity("webdav");
+  res.once("close", end);
+}
+
 
 /**
  * 当前要参与同步的本地文件清单。
@@ -91,6 +123,103 @@ function requireConfig(res: express.Response): WebDAVConfig | null {
 function effectiveConfig(): WebDAVConfig {
   const cfg = loadWebDAVConfig();
   return { ...cfg, remoteDir: remoteDirOf(cfg) };
+}
+
+// ===== 合并（冲突时的第三个选项）=====
+
+/** 合并报告 */
+export interface MdMergeReport {
+  /** 只在本地存在（远端没有）的条目 */
+  localOnly: number;
+  /** 只在远端存在（别的设备新增）的条目 */
+  remoteOnly: number;
+  /** 同 id、远端更新时间更新 → 采用远端 */
+  fromRemote: number;
+  /** 同 id、本地更新时间更新 → 保留本地 */
+  fromLocal: number;
+  /** 同 id、时间相同但内容不同 → 保留本地，需要人工确认 */
+  conflicts: Array<{ id: string; title: string }>;
+  /** 无法解析、被跳过的条目数 */
+  invalid: number;
+  total: number;
+}
+
+/** 比较内容时忽略「时间戳」本身 */
+function contentSnapshot(item: WorkbenchItem): string {
+  const { updatedAt: _u, createdAt: _c, ...rest } = item;
+  return JSON.stringify(rest);
+}
+
+/**
+ * 合并两份 workspace.md 文本。
+ *
+ * 规则：按 id 取并集 ——
+ *  - 只有一边有 → 都保留（别的设备新增的不会丢）
+ *  - 两边都有且内容不同 → 用 `updatedAt` 较新的一版
+ *  - 时间相同 / 都没有时间 → 保留本地，并记入 conflicts
+ *
+ * 注意这是**条目级**合并，不是字段级：同一个 id 两边改了不同字段时，
+ * 只会留较新那一版。字段级合并留给 CalDAV 通道（那边有同步基线）。
+ */
+export function mergeWorkspaceText(
+  localText: string,
+  remoteText: string,
+): { text: string; report: MdMergeReport } {
+  const local = parseWorkspace(localText);
+  const remote = parseWorkspace(remoteText);
+  const localItems = local.items.filter((i) => !i.errors);
+  const remoteItems = remote.items.filter((i) => !i.errors);
+
+  const byId = new Map<string, WorkbenchItem>();
+  for (const it of localItems) byId.set(it.id, { ...it });
+
+  const report: MdMergeReport = {
+    localOnly: 0,
+    remoteOnly: 0,
+    fromRemote: 0,
+    fromLocal: 0,
+    conflicts: [],
+    invalid:
+      local.items.length -
+      localItems.length +
+      (remote.items.length - remoteItems.length),
+    total: 0,
+  };
+
+  const remoteIds = new Set(remoteItems.map((i) => i.id));
+  report.localOnly = localItems.filter((i) => !remoteIds.has(i.id)).length;
+
+  for (const r of remoteItems) {
+    const l = byId.get(r.id);
+    if (!l) {
+      byId.set(r.id, { ...r });
+      report.remoteOnly++;
+      continue;
+    }
+    if (contentSnapshot(l) === contentSnapshot(r)) continue;
+
+    const lt = Date.parse(l.updatedAt || "") || 0;
+    const rt = Date.parse(r.updatedAt || "") || 0;
+    if (rt > lt) {
+      byId.set(r.id, { ...r });
+      report.fromRemote++;
+    } else if (lt > rt) {
+      report.fromLocal++;
+    } else {
+      report.conflicts.push({ id: r.id, title: r.title });
+    }
+  }
+
+  // 笔记是自由文本，不去猜哪边对：两边都有就都留着，标个来源
+  const ln = local.notes.trim();
+  const rn = remote.notes.trim();
+  let notes = ln || rn;
+  if (ln && rn && ln !== rn) {
+    notes = `${ln}\n\n<!-- 合并自远端 -->\n${rn}`;
+  }
+
+  report.total = byId.size;
+  return { text: serializeWorkspace([...byId.values()], notes), report };
 }
 
 // ===== GET /api/webdav/status =====
@@ -173,13 +302,15 @@ function info_etag_changed(
  * 把本地 md 文件推送到远端。
  *
  * Body:
- *   - files?: ("events"|"kanban")[]  只推指定文件；缺省全部
+ *   - files?: "workspace"[]  只推指定文件；缺省全部（v0.3 只有 workspace）
  *   - force?: boolean  忽略 ETag 检查强制覆盖（远端被他人改动时用）
  *
  * 默认带 `If-Match` 乐观锁：远端自上次同步后被改动时会返回 412，
  * 避免静默覆盖其他设备上的修改。
  */
-webdavRouter.post("/push", async (req, res) => {
+webdavRouter.post("/push", asyncHandler(async (req, res) => {
+  if (!requireSyncNotSuspended(res)) return;
+  markWebDAVActivity(res);
   const cfg = requireConfig(res);
   if (!cfg) return;
   const eff = effectiveConfig();
@@ -222,6 +353,12 @@ webdavRouter.post("/push", async (req, res) => {
             localEtag: known,
             remoteEtag: info.etag,
           });
+          recordSyncConflict({
+            channel: "webdav",
+            remoteEtag: info.etag,
+            localHash: known,
+            summary: "推送时远端文件已被其他设备修改",
+          });
           continue;
         }
       }
@@ -247,12 +384,24 @@ webdavRouter.post("/push", async (req, res) => {
   }
 
   const anyOk = results.some((r) => r.ok);
+  const okCount = results.filter((r) => r.ok).length;
+  const failCount = results.length - okCount;
+  recordSyncEvent(
+    "webdav",
+    failCount > 0 && !anyOk ? "error" : "push",
+    `WebDAV 推送：成功 ${okCount}，失败 ${failCount}`,
+  );
+  for (const r of results) {
+    if (r.ok === false && typeof r.error === "string") {
+      recordSyncEvent("webdav", "error", String(r.error));
+    }
+  }
   res.status(anyOk ? 200 : 500).json({
     success: anyOk,
     remoteDir: eff.remoteDir,
     results,
   });
-});
+}));
 
 // ===== POST /api/webdav/pull =====
 
@@ -260,13 +409,15 @@ webdavRouter.post("/push", async (req, res) => {
  * 从远端拉取 md 文件覆盖本地。
  *
  * Body:
- *   - files?: ("events"|"kanban")[]  只拉指定文件；缺省全部
+ *   - files?: "workspace"[]  只拉指定文件；缺省全部（v0.3 只有 workspace）
  *   - force?: boolean  即使远端 ETag 与上次同步相同也覆盖本地
  *
  * 默认只在「远端确实变化过」时才覆盖本地，避免无意义地冲掉本地未同步的改动。
  * 拉取前会自动备份本地文件为 `.bak`，防止误覆盖导致数据丢失。
  */
-webdavRouter.post("/pull", async (req, res) => {
+webdavRouter.post("/pull", asyncHandler(async (req, res) => {
+  if (!requireSyncNotSuspended(res)) return;
+  markWebDAVActivity(res);
   const cfg = requireConfig(res);
   if (!cfg) return;
   const eff = effectiveConfig();
@@ -338,11 +489,119 @@ webdavRouter.post("/pull", async (req, res) => {
   }
 
   const anyOk = results.some((r) => r.ok);
+  const okCount = results.filter((r) => r.ok).length;
+  const failCount = results.length - okCount;
+  recordSyncEvent(
+    "webdav",
+    failCount > 0 && !anyOk ? "error" : "pull",
+    `WebDAV 拉取：成功 ${okCount}，失败 ${failCount}`,
+  );
+  for (const r of results) {
+    if (r.ok === false && typeof r.error === "string") {
+      recordSyncEvent("webdav", "error", String(r.error));
+    }
+  }
   res.status(anyOk ? 200 : 500).json({
     success: anyOk,
     remoteDir: eff.remoteDir,
     results,
   });
+}));
+
+// ===== POST /api/webdav/merge =====
+
+/**
+ * 冲突时的第三个选项：把远端条目与本地条目**合并**，然后两端都写同一份。
+ *
+ * 顺序很重要：先带 If-Match 推远端，成功后再写本地。
+ * 这样合并期间远端又被别人改动时，本地不会被改坏（返回 409 让用户重试）。
+ *
+ * 覆盖本地前会备份为 `.bak`。
+ */
+webdavRouter.post("/merge", async (_req, res) => {
+  if (!requireSyncNotSuspended(res)) return;
+  markWebDAVActivity(res);
+  const cfg = requireConfig(res);
+  if (!cfg) return;
+  const eff = effectiveConfig();
+  const t = syncTargets(eff)[0];
+
+  try {
+    const info = await statRemoteFile(eff, t.filename);
+    if (!info.exists) {
+      return res.status(400).json({
+        success: false,
+        error: "远端还没有 workspace.md；先「推送到 WebDAV」建立基线，再合并",
+      });
+    }
+
+    const remoteText = await getRemoteFile(eff, t.filename);
+    if (remoteText === null) throw new Error("下载远端文件失败");
+    const localText = fs.existsSync(t.localPath)
+      ? fs.readFileSync(t.localPath, "utf-8")
+      : "";
+
+    const { text, report } = mergeWorkspaceText(localText, remoteText);
+
+    // 先推远端（乐观锁）；失败则本地完全不动
+    let etag: string | undefined;
+    try {
+      ({ etag } = await putRemoteFile(eff, t.filename, text, info.etag));
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (/412/.test(msg)) {
+        recordSyncConflict({
+          channel: "webdav",
+          remoteEtag: info.etag,
+          summary: "合并期间远端又被修改了，需要重新合并",
+        });
+        return res.status(409).json({
+          success: false,
+          error: "合并期间远端又被修改了，请刷新状态后重试",
+        });
+      }
+      throw e;
+    }
+
+    // 本地写入 + 备份
+    let backupPath: string | undefined;
+    if (fs.existsSync(t.localPath)) {
+      backupPath = `${t.localPath}.bak`;
+      fs.copyFileSync(t.localPath, backupPath);
+    }
+    fs.mkdirSync(path.dirname(t.localPath), { recursive: true });
+    fs.writeFileSync(t.localPath, text, "utf-8");
+
+    const state = readSyncState(t.localPath);
+    state.etags[t.filename] = etag || "";
+    state.syncedAt = state.syncedAt || {};
+    state.syncedAt[t.filename] = new Date().toISOString();
+    writeSyncState(t.localPath, state);
+
+    recordSyncEvent(
+      "webdav",
+      "merge",
+      `WebDAV 合并：远端新增 ${report.remoteOnly}，本地新增 ${report.localOnly}，` +
+        `冲突 ${report.conflicts.length}，总条目 ${report.total}`,
+    );
+    for (const c of report.conflicts) {
+      recordSyncConflict({
+        channel: "webdav",
+        localId: c.id,
+        summary: `「${c.title}」两边同时修改且时间相同，保留本地，需人工确认`,
+      });
+    }
+
+    res.json({
+      success: true,
+      filename: t.filename,
+      merged: report,
+      etag,
+      backupPath,
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: (e as Error).message });
+  }
 });
 
 // ===== POST /api/webdav/test =====
