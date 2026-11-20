@@ -569,6 +569,21 @@ Contributions welcome! See existing code style and structure.
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) / [docs/UPDATE_LOG.md](docs/UPDATE_LOG.md) — 版本与迭代记录
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 开发约定（含「不要再引入第二个数据文件」等铁律）
 
+## 🙏 开源借鉴
+
+本项目的实现为独立编写，但在设计过程中参考了以下开源项目的公开思路与文档
+（**未复制任何 GPL / AGPL / MPL / 无许可证项目的代码**）：
+
+- **Calino** — 自然语言创建与日历交互
+- **Aperio** — Provider / Adapter 架构与同步引擎设计
+- **MD Calendar** — 单 Markdown 文件作为日历的理念
+- **Obsidian Tasks** — 任务语法、查询与重复规则
+- **Syncthing** — 冲突副本命名与生命周期思想
+- **node-diff3** — 三方合并思路
+
+我们仍专注自身软件开发：`workspace.md` 单一事实源、本地优先、不 fork 任何竞品。
+完整核验（许可证 / 活跃度 / 可引入裁决）见 [docs/research/OPEN_SOURCE_RESEARCH.md](docs/research/OPEN_SOURCE_RESEARCH.md)。
+
 ## 🤖 AI-Assisted Development
 
 This project was developed with the help of AI coding assistants, demonstrating how modern AI tools can accelerate software development while maintaining high code quality and best practices.
