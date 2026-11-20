@@ -21,7 +21,7 @@ function seedFile(items: WorkbenchItem[], notes = ""): void {
   fs.writeFileSync(file, serializeWorkspace(items as any, notes), "utf-8");
 }
 import { LockReentryError, LockTimeoutError, WorkspaceReadError, WorkspaceValidationError } from "../errors.js";
-import { setStorageReadOnly, setSyncMaintenance } from "../sync-control.js";
+import { invalidateSyncEpoch, setStorageReadOnly, setSyncMaintenance } from "../sync-control.js";
 
 let dir: string;
 let file: string;
@@ -269,6 +269,43 @@ describe("写入口 mutateWorkspace（S2）", () => {
     await expect(
       mutateWorkspace((ws) => { ws.items[0].title = "x"; }, { filePath: file }),
     ).rejects.toThrow(/恢复/);
+  });
+
+  it("fn 挂起期间进入恢复维护态 → 提交前被拦住，不写盘", async () => {
+    seedFile([item({ title: "原文" })]);
+    const before = fs.readFileSync(file, "utf-8");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+
+    const writing = mutateWorkspace(async (ws) => {
+      ws.items[0].title = "被中断的编辑";
+      await gate; // 让出事件循环，模拟异步写入
+    }, { filePath: file });
+
+    // 写入已持有锁并过了入口检查，此时恢复开始
+    setSyncMaintenance(true);
+    release();
+
+    await expect(writing).rejects.toThrow(/恢复/);
+    expect(fs.readFileSync(file, "utf-8")).toBe(before); // 旧快照没有落盘
+  });
+
+  it("fn 挂起期间 epoch 变化 → 提交前被拦住，不写盘", async () => {
+    seedFile([item({ title: "原文" })]);
+    const before = fs.readFileSync(file, "utf-8");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+
+    const writing = mutateWorkspace(async (ws) => {
+      ws.items[0].title = "过期纪元的编辑";
+      await gate;
+      invalidateSyncEpoch(); // 模拟恢复在 await 期间让纪元失效
+    }, { filePath: file });
+
+    release();
+
+    await expect(writing).rejects.toThrow(/纪元|同步/);
+    expect(fs.readFileSync(file, "utf-8")).toBe(before);
   });
 });
 

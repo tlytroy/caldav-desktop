@@ -21,7 +21,7 @@
 | 配置 | `config.ts`、`routes/config.ts` | stable | `config-plugins.test.ts` | v0.3 token 文件/原子写 |
 | 插件扫描 | `routes/plugins.ts` | stable | 同上 | — |
 
-> 测试数（2026-11-05）：server 20 文件 / 444 通过 / 0 skip；renderer 13 文件 / 113 通过。
+> 测试数（2026-11-20）：server 20 文件 / 446 通过 / 0 skip；renderer 13 文件 / 115 通过。
 > 端到端验收：`bash scripts/run-e2e.sh`（隔离服务）92 + 32 全通过。
 
 ## 前端

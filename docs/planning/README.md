@@ -104,7 +104,7 @@ docs/planning/
 > P8：`sync-overview.ts`（只读快照，**不联网**）、`sync-control.ts` 的 `recordSyncEvent` /
 > `recordSyncConflict` 环形缓冲（各 20 条，重启清空）、`GET /api/sync/overview`，
 > 前端 `modules/sync`（替换 git-sync 占位）+ `api/sync.ts` + `syncCenter.*` i18n；
-> CalDAV/WebDAV 的 push/pull/merge/冲突点都已接入记录。server 444（20 文件）/ renderer 115（13 文件）。
+> CalDAV/WebDAV 的 push/pull/merge/冲突点都已接入记录。server 446（20 文件）/ renderer 115（13 文件）。
 > P9：版本号统一到 `0.3.0`；升级演练（v0.2.x 数据 + 无 token 启动 → 自动生成 token、
 > 坏块不影响好条目、frontmatter 自定义字段保留、`%61pi` 400）；Docker 镜像构建 + 运行烟测；
 > 修掉 `rrule` CJS 在 ESM 下的启动崩（测试被 vitest 转换掩盖，只有跑 `dist/` 才暴露）。

@@ -16,7 +16,7 @@ import {
   WorkspaceValidationError,
   type GraphIssue,
 } from "./errors.js";
-import { assertWritable } from "./sync-control.js";
+import { assertWritable, currentSyncEpoch } from "./sync-control.js";
 import { withWorkspaceLock } from "./workspace-lock.js";
 import {
   backupWorkspaceFile,
@@ -273,6 +273,9 @@ export async function mutateWorkspace<T>(
   return withWorkspaceLock(async () => {
     // 拿到锁之后再检查：恢复开始前排队、恢复结束后才轮到执行的写必须被拦住
     assertWritable(opts.epoch, "工作区写入");
+    // fn 让出事件循环期间 restore 可能 invalidateSyncEpoch()+setSyncMaintenance(true)；
+    // 提交前必须复核，否则在途旧快照会静默覆盖恢复结果且调用方收到「成功」。
+    const epochAtEntry = currentSyncEpoch();
 
     const ws = readWorkspace(filePath);
     const before = fingerprintItems(ws.items);
@@ -290,6 +293,7 @@ export async function mutateWorkspace<T>(
     const parsedItems = assertTextIsUsable(text);
     validateOutcome(parsedItems, changed, mode);
 
+    assertWritable(epochAtEntry, "工作区写入");
     writeText(filePath, text, true);
     return { result, filePath };
   }, opts.timeoutMs);
@@ -310,6 +314,7 @@ export async function mutateWorkspaceText<T>(
 
   return withWorkspaceLock(async () => {
     assertWritable(opts.epoch, "工作区写入");
+    const epochAtEntry = currentSyncEpoch();
 
     const ws = readWorkspace(filePath);
     const before = fingerprintItems(ws.items);
@@ -321,6 +326,7 @@ export async function mutateWorkspaceText<T>(
     const changed = changedIdsOf(before, after);
     validateOutcome(parsedItems, changed, mode);
 
+    assertWritable(epochAtEntry, "工作区写入");
     writeText(filePath, text, true);
     return { result, filePath };
   }, opts.timeoutMs);

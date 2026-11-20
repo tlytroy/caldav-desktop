@@ -216,11 +216,9 @@ ICS 只在与外部日历软件交换数据时出现（导入 / 导出 / CalDAV 
 
 ## 📦 Builds
 
-Pre-built packages available in `apps/desktop/dist-electron/`:
-
-- Linux: `CalDAV-Desktop-0.3.1-linux.AppImage` (~100MB)
-- Linux: `CalDAV-Desktop-0.3.1-linux.tar.gz` (~95MB)
-- Windows/macOS: See Deployment section below
+> ⚠️ 当前没有随仓库提供预构建安装包（`apps/desktop/dist-electron/` 里的旧包版本已过期）。
+> 请使用下面的「Build Steps」从源码构建，或按 [部署文档](docs/DEPLOYMENT.md) 用 Docker 运行。
+> 需要安装包时执行 `pnpm package:linux` / `package:win` / `package:mac` 自行生成。
 
 ### Linux (All Distributions)
 
