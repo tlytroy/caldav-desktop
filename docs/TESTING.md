@@ -142,7 +142,8 @@ ServiceWorker 报一堆错**，那不是 bug。
 ## 未覆盖 / 未验证
 
 - Electron 桌面端实际启动
-- 真实 CalDAV 服务器上的 push / pull 往返（测试用本地模拟服务端，未连真实 Radicale）
+- 真实 CalDAV 服务器上的 push / pull 往返：**2026-11-20 已在用户提供的 Radicale 上实测通过（12/12）**，
+  但只覆盖「本地建 → push → 远端改 → pull → 清理」，不含删除传播（墓碑，未实现）
 - 真实 WebDAV 服务商（坚果云 / Nextcloud）—— 测试用的是本地模拟服务端
 - Android 打包运行
 - CalDAV 删除传播（墓碑记录，功能本身未实现，见 SYNC_MANAGEMENT.md）
@@ -154,4 +155,4 @@ ServiceWorker 报一堆错**，那不是 bug。
 
 ---
 
-**Last Updated**: 2026-11-02
+**Last Updated**: 2026-11-20

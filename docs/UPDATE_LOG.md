@@ -2,6 +2,26 @@
 
 这个文件记录了项目的持续更新和改进。每次更新都应该在这个文件中添加相关信息，而不是创建新的更新日志文件。
 
+## 2026-11-20（v0.4 规划固化 + Radicale 真机 CalDAV 往返实测）
+
+### v0.4 产品决策与实施计划
+- 用户裁决 6 项方向 → `docs/planning/v0.4-product-decisions.md`（D36–D42）：
+  Windows 桌面优先、单机本地优先（NAS 第二形态）、 Radicale 建基线、
+  单文件事实源 + 派生索引（v0.4.5 再做 Spike）、成熟度版本而非功能堆积。
+- 按决策推导 `docs/planning/v0.4-implementation-plan.md`（草案，未评审）：
+  PR 序列 A 桌面交互 / B 派生索引 / C 同步正确性 / D 导入与清理。
+
+### Radicale 真机 CalDAV 往返（12/12 通过）
+- 用户提供 Radicale 服务，PROPFIND Depth:0/1 返回 207（日历 AT，含 3 个既有 .ics）。
+- 用隔离临时 workspace + 真服务端跑 push/pull：建唯一 UID 事件 → push →
+  PROPFIND 找到对象 → GET 验证 UID → 远端改 SUMMARY → pull → 本地标题更新 →
+  清理远端对象（DELETE 204）+ `/api/caldav/test` / status 全绿。
+- 发现该 Radicale 服务端会在一段时间后自行重建日历集合（期间短暂 404，
+  MKCOL 重建后恢复）；这不影响同步逻辑，但真机测试要容忍目标 URL 偶发 404。
+- 重要：远端对象的实际文件名由服务端生成，**不能按 UID 猜 .ics 文件名**，
+  必须 PROPFIND + GET 按 UID 定位（测试脚本已按此实现）。
+- 测试脚本与临时凭据均已删除；远端无测试对象残留。
+
 ## 2026-11-05（真实 WebDAV 实测：修掉「每次推送都误报冲突」的 ETag 缺陷 + 审计四项收口）
 
 用户给了一个真实的 WebDAV 账号（某 OneDrive/SharePoint 风格的网盘网关），第一次在**真机**上跑同步链路。
