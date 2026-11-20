@@ -12,6 +12,8 @@ docs/planning/
 ├── v0.3-plan-v0.4.md         # v0.4 条件关闭稿（存档）
 ├── v0.3-plan.md              # 定稿 v1.0（当前）
 ├── v0.3.0-sds.md             # SDS v0.3（两轮复审有条件通过）
+├── v0.4-product-decisions.md  # v0.4 产品/架构决策定稿（D36–D42，2026-11-20）
+├── v0.4-implementation-plan.md # v0.4 实施计划草案（依据决策推导，未评审）
 ├── oss-reuse-audit.md        # 自研 vs 开源库审计（D35 落地）
 ├── oss-landscape.md          # 同类开源项目与可复用模块调研
 └── reviews/
@@ -112,3 +114,13 @@ docs/planning/
 > P9 后补（2026-11-05）：真实 WebDAV 实测修掉「PUT/HEAD ETag 两套命名空间导致每次 push 误报冲突」；
 > 两个验收脚本补 Bearer 认证 + 新增 `scripts/run-e2e.sh` 隔离 runner（92 + 32 全通过）；
 > 「放弃本次恢复」补 UI；CI 加 `e2e` job、产物路径改 `dist-server/`。
+
+## v0.4 规划（2026-11-20）
+
+- [x] 用户裁决六项方向问题 → `v0.4-product-decisions.md`（D36–D42）
+- [x] 依据决策推导实施计划草案 → `v0.4-implementation-plan.md`（未评审）
+- [ ] 实施计划评审（架构 / 产品双视角）→ 评审通过后再写代码
+
+> v0.4 定位：**Desktop-first · Local-first · Markdown-native · Sync-optional**，是成熟度版本而非功能堆积版本。
+> 发布节奏：v0.4.0 桌面体验 → v0.4.1 同步正确性（墓碑 + Radicale 基线）→ v0.4.2 生态导入与假入口清理。
+> 等待用户配合：Electron GUI 窗口冒烟（8 项）、Radicale 服务器真机 CalDAV 测试。
